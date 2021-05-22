@@ -231,7 +231,8 @@ class MTSP(Env):
             and not done # If not all robots are returned to base (some of them are doing assignment)
             ):
             dt_sum, done = self.update_robots(dt_sum, done)
-
+            
+        done = bool(done)
         return dt_sum, done
 
     def get_numpy_state(self):
