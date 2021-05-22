@@ -22,20 +22,27 @@ class ReplayBuffer:
     def reset(self):
         self.buffer = []
 
-    def append(self, sarsa):
+    def append(self, sarsd):
+        # ('state, action, reward, state_next, done')
         if len(self.buffer) == self.size:
             self.buffer.pop(0)
-        self.buffer.append(sarsa)
+        self.buffer.append(sarsd)
 
-    def get(self):
-        assert len(self.buffer) > self.config['learning']['size_batch'], (
-            f"Not enough data is collected for a batch size {size_batch}, currently {len(self.buffer)}"
+    def sample(self):
+        ''' 
+        ############ CAUTION ############
+        random.sample() does not copy data, it takes reference. 
+        Do not change the data after sampling.
+        '''
+        assert len(self.buffer) >= self.config['learning']['size_batch'], (
+            f"Not enough data is collected for a batch size {self.config['learning']['size_batch']}, "
+            + f"currently {len(self.buffer)}"
             )
         return random.sample(self.buffer, self.config['learning']['size_batch'])
 
 
 class Model(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, device='cpu'):
         super().__init__()
         self.config = config
         self.tau = 1.
@@ -65,6 +72,8 @@ class Model(nn.Module):
         self.fc_Q = nn.Linear(2 * self.base_hidden_size, 1, bias=False)
 
         self.replay_buffer = ReplayBuffer(config)
+        self.device = device
+        self.step_train = 0
 
     def forward(self, state, action):
         ''' 
@@ -84,7 +93,7 @@ class Model(nn.Module):
         avail_robot = state['avail_robot'] # (n_batch, 1, n_robots)
 
         no_robot = torch.sum(avail_robot, dim=-1).squeeze(-1)==0
-        assert not no_robot.any(), f"There is no available robot in some batch, {no_robot}"
+        if no_robot.any(): logger.warning(f"There is no available robot in some batch, {no_robot}, may be the game is done")
 
         assigned_visited_city = (avail_node_presence - assignment) < 0
         assert not assigned_visited_city.any(), f"Robot is assigned to already visited city!, {assigned_visited_city}"
@@ -156,8 +165,10 @@ class Model(nn.Module):
         action_numpy = self._convert_list_action_to_numpy(action)
         action_tensor = torch.from_numpy(action_numpy).float()
         Q = self.forward(state_tensor, action_tensor)
+        
+        Q = Q.detach().numpy()
 
-        return Q.detach().numpy()
+        return Q
 
     def get_Q_from_numpy_action(self, state, action):
         state_tensor = {
@@ -166,7 +177,13 @@ class Model(nn.Module):
         action_tensor = torch.from_numpy(action).float()
         Q = self.forward(state_tensor, action)
 
-        return Q.detach().numpy()
+        Q = Q.detach().numpy()
+
+        return Q
+
+    def get_Q_from_tensor_action(self, state, action):
+        Q = self.forward(state, action)
+        return Q
 
     # Action based on learned Q: auctino for multiple robots, argmax for a robot
     def action(self, state):
@@ -185,15 +202,20 @@ class Model(nn.Module):
             check_multiple_available_robots
             and check_multiple_available_nodes
             ):
-            _action = self._auction(state)
+            action_list = self._auction(state)
         elif check_multiple_available_nodes: # multiple nodes, one robot
-            _action = self._argmax_action(state)
+            action_list = self._argmax_action(state)
         else: # only one node (base), should go base
-            _action = [ None for _ in range(self.config['env']['num_robots']) ]
+            action_list = [ None for _ in range(self.config['env']['num_robots']) ]
             for idx_robot in idx_avail_robots:
-                _action[idx_robot] = self.config['env']['num_cities'] # go_base
+                action_list[idx_robot] = self.config['env']['num_cities'] # go_base
 
-        return _action
+        action_numpy = self._convert_list_action_to_numpy(action_list)
+
+        return {
+            'list': action_list,
+            'numpy': action_numpy,
+        }
 
     # random action used for epsilon-greedy
     def random_action(self, state):
@@ -206,33 +228,140 @@ class Model(nn.Module):
         check_multiple_available_robots = np.sum(state['avail_robot']) > 1
         check_multiple_available_nodes = np.sum(state['avail_node_action']) > 1
 
-        idx_avail_robots = self.get_idx_avail_robots_from_state(state)
-        idx_avail_nodes = self.get_idx_avail_nodes_from_state(state)
+        idx_avail_robots = self._get_idx_avail_robots_from_state(state)
+        idx_avail_nodes = self._get_idx_avail_nodes_from_state(state)
 
-        _action = [None for _ in range(self.config['env']['num_robots'])]
+        action_list = [None for _ in range(self.config['env']['num_robots'])]
         for idx_robot in idx_avail_robots:
             idx_node = random.sample(idx_avail_nodes, 1)[0]
-            _action[idx_robot] = idx_node
+            action_list[idx_robot] = idx_node
             self._remove_node(idx_avail_nodes, idx_node)
 
-        return _action
+        action_numpy = self._convert_list_action_to_numpy(action_list)
+
+        return {
+            'list': action_list,
+            'numpy': action_numpy,
+        }
+
+    def _set_batch(self):
+        batch = self.replay_buffer.sample()
+        state_tuple, action_tuple, reward_tuple, state_next_tuple, done_tuple = zip(*batch)
+        
+        argmax_action_numpy_list = []
+        for idx, state_next in enumerate(state_next_tuple):
+            if not done_tuple[idx]:
+                argmax_action = self.action(state_next)
+            else:
+                argmax_action = {'numpy': np.zeros([ *action_tuple[0].shape ])} # add an unused dummy action if the game is done
+            argmax_action_numpy_list.append(argmax_action['numpy'])
+
+        for idx in range(self.config['learning']['size_batch']):
+            for key in self.batch['state']:
+                self.batch['state'][key][idx] = state_tuple[idx][key][0]
+            self.batch['action'][idx] = action_tuple[idx]
+            self.batch['reward'][idx, 0] = reward_tuple[idx]
+            self.batch['done'][idx, 0] = float(done_tuple[idx])
+            for key in self.batch['state_next']:
+                self.batch['state_next'][key][idx] = state_next_tuple[idx][key][0]
+            self.batch['argmax_action'][idx] = argmax_action_numpy_list[idx][0]
+
+    def _get_batch(self):
+        self._set_batch()
+        batch = {
+            'state': {
+                key: torch.from_numpy(self.batch['state'][key]).float().to(self.device) for key in self.batch['state']
+            },
+            'action': torch.from_numpy(self.batch['action']).float().to(self.device),
+            'reward': torch.from_numpy(self.batch['reward']).float().to(self.device),
+            'done': torch.from_numpy(self.batch['done']).float().to(self.device),
+            'state_next': {
+                key: torch.from_numpy(self.batch['state_next'][key]).float().to(self.device) for key in self.batch['state_next']
+            },
+            'argmax_action': torch.from_numpy(self.batch['argmax_action']).float().to(self.device),
+        }
+
+        return batch
+
+    def get_processed_batch(self):
+        batch = self._get_batch()
+        Q = self.get_Q_from_tensor_action(batch['state'], batch['action'])
+        Q_next_max = self.get_Q_from_tensor_action(batch['state_next'], batch['argmax_action']).detach() # We do not generate gradient from target Q value
+
+        processed_batch = dict()
+        processed_batch['Q'] = Q
+        processed_batch['reward'] = batch['reward']
+        processed_batch['done'] = batch['done']
+        processed_batch['Q_next_max'] = Q_next_max
+
+        return processed_batch
 
     def initialize_batch(self):
-        self.batch = {
-            'assignment_prev': np.zeros([
+        self.shapes = {
+            'state':{
+                'assignment_prev': (
+                        self.config['learning']['size_batch'], 
+                        self.config['env']['num_robots'],
+                        self.config['env']['num_cities'] + 1
+                        ),
+                'x_a': (
+                    self.config['learning']['size_batch'], 
+                    self.config['env']['num_robots'],
+                    self.config['env']['num_cities'] + 1
+                    ),
+                'x_b': (
+                    self.config['learning']['size_batch'], 
+                    self.config['env']['num_cities'] + 1,
+                    1
+                    ),
+                'edge': (
+                    self.config['learning']['size_batch'], 
+                    self.config['env']['num_cities'], # no '+1' since there is no edge going out from the base
+                    self.config['env']['num_cities'] + 1, 
+                    3
+                    ),
+                'avail_node_presence': (
+                    self.config['learning']['size_batch'], 
+                    1,
+                    self.config['env']['num_cities'] + 1
+                    ),
+                'avail_node_action': (
+                    self.config['learning']['size_batch'], 
+                    1,
+                    self.config['env']['num_cities'] + 1
+                    ),
+                'avail_robot': (
+                    self.config['learning']['size_batch'], 
+                    1,
+                    self.config['env']['num_robots']
+                    ),
+                },
+            'action': (
                 self.config['learning']['size_batch'], 
                 self.config['env']['num_robots'],
                 self.config['env']['num_cities'] + 1
-                ]),
-            'x_a': np.zeros([
+                ),
+            'reward': (
                 self.config['learning']['size_batch'], 
-                1,
-                self.config['env']['num_cities'] + 1
-                ]),
+                1
+                ),
+            'done': (
+                self.config['learning']['size_batch'], 
+                1
+                ),
         }
-
-    def process_batch(self):
-        batch = self.replay_buffer.get()
+        self.batch = {
+            'state': {
+                key: np.zeros([ *self.shapes['state'][key] ]) for key in self.shapes['state']
+                },
+            'action': np.zeros([ *self.shapes['action'] ]),
+            'reward': np.zeros([ *self.shapes['reward'] ]),
+            'done': np.zeros([ *self.shapes['done'] ]),
+            'state_next':{
+                key: np.zeros([ *self.shapes['state'][key] ]) for key in self.shapes['state']
+                },
+            'argmax_action': np.zeros([ *self.shapes['action'] ]),
+            }
 
     def add_to_replay_buffer(self, sarsa):
         self.replay_buffer.append(sarsa)
@@ -306,10 +435,10 @@ class Model(nn.Module):
 
     # Argmax action when there is only one available robot
     def _argmax_action(self, state):
-        _action = [None for _ in range(self.config['env']['num_robots'])]
+        action_list = [None for _ in range(self.config['env']['num_robots'])]
 
-        idx_avail_robots = self.get_idx_avail_robots_from_state(state)
-        idx_avail_nodes = self.get_idx_avail_nodes_from_state(state)
+        idx_avail_robots = self._get_idx_avail_robots_from_state(state)
+        idx_avail_nodes = self._get_idx_avail_nodes_from_state(state)
 
         assert len(idx_avail_robots)==1, "argmax action can not be computed when there is multiple available robots"
         idx_robot = idx_avail_robots[0]
@@ -336,9 +465,9 @@ class Model(nn.Module):
         logger.info(f"Q_avail_nodes: {Q_avail_nodes_of_a_robot}")
         logger.info(f"idx_avail_nodes: {idx_avail_nodes}")
 
-        _action[idx_robot] = argmax_node
+        action_list[idx_robot] = argmax_node
 
-        return _action
+        return action_list
 
     def _remove_node(self, idx_nodes, idx_node):
         if not idx_node == self.config['env']['num_cities']:
@@ -360,10 +489,10 @@ class Model(nn.Module):
 
         return idx_avail_nodes
 
-    def _convert_list_action_to_numpy(self, action):
+    def _convert_list_action_to_numpy(self, action_list):
         # convert action list into a tensor
         action_numpy = np.zeros([1, self.config['env']['num_robots'], self.config['env']['num_cities'] + 1])
-        for idx, _action in enumerate(action):
+        for idx, _action in enumerate(action_list):
             if _action is None:
                 continue
             else:
