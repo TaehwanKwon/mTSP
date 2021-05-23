@@ -5,5 +5,7 @@ class LoggerTool:
         self.path = path
         self.writer = SummaryWriter(path)
 
-    def write(self):
-        pass
+    def write(self, step, stats):
+    	for key in stats:
+    		self.writer.add_scalar(f"{key}", step, stats[key])
+
