@@ -21,6 +21,6 @@ class Agent:
         Q_next_max = processed_batch['Q_next_max']
         Q_target = processed_batch['reward'] + self.config['gamma'] * (1 - processed_batch['done']) * Q_next_max
         
-        loss = F.smooth_l1_loss(Q_target, Q_next_max)
+        loss = F.smooth_l1_loss(Q_target, Q)
 
         return loss
