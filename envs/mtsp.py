@@ -216,7 +216,7 @@ class MTSP(Env):
             else:
                 plt.plot([self.base.x, robot.x], [self.base.y, robot.y], color=color)
 
-        plt.legend(bbox_to_anchor=(0.5, 0.025, 0.5, 0.5), loc=1, borderaxespad=0., fontsize=20, framealpha=0.4)
+        plt.legend(bbox_to_anchor=(0.5, 0.025, 0.5, 0.5), loc=1, borderaxespad=0., fontsize=10, framealpha=0.4)
         if not path is None:
             plt.savefig(path)
 
