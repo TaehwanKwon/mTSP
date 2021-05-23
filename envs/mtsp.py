@@ -31,6 +31,7 @@ class Robot:
         self.assigned_city = None
         self.remaining_distance = -1
         self.is_returned_to_base = False
+        self.cost = 0
 
     def distance(self, entity):
         distance = (
@@ -46,7 +47,7 @@ class Robot:
         dist = (dy ** 2 + dx ** 2) ** 0.5
         self.x = self.x + (dx / dist) * dt * self.speed
         self.y = self.y + (dy / dist) * dt * self.speed
-        logger.info(f"self.x: {self.x}, self.y: {self.y}")
+        logger.debug(f"self.x: {self.x}, self.y: {self.y}")
 
     def assign_city(self, city):
         self.is_assigned = True
@@ -56,15 +57,16 @@ class Robot:
            city.assigned_robots.append(self) 
         else:
             city.assigned_robot = self
+        self.cost += self.remaining_distance
 
     def finish(self):
         self.location_history.append(self.assigned_city)
         is_at_base = type(self.assigned_city) == Base
         if not is_at_base: # if the last assignment was not the base, finish the city.
             self.location_history[-1].finish()
-            logger.info(f"robot {self.id} finish assignment city {self.assigned_city.id}")
+            logger.debug(f"robot {self.id} finish assignment city {self.assigned_city.id}")
         else:
-            logger.info(f"robot {self.id} is returned to base")
+            logger.debug(f"robot {self.id} is returned to base")
             self.is_returned_to_base = True
             
         self.is_assigned = False
@@ -105,25 +107,40 @@ class City:
 
 
 class MTSP(Env):
-    def __init__(self, config):
-        self.config = config['env']
+    def __init__(self, config_env):
+        self.config = config_env
         self.finished_robots = []
         self.robot_color_list = ['red', 'blue', 'purple', 'orange', 'sky', 'yellow', 'pink']
+        
+        self._from_file()
 
-    def _from_file(self, file):
-        # To be implemented
-        return [] # list of (x, y) of cities
-
-    def _get_base(self):
-        self.base = Base(self.config['base']['x'], self.config['base']['y'])
-
-    def _get_cities(self):
+    def _from_file(self):
         file = self.config['file'] if 'file' in self.config else None
         if file:
-            xys = self._from_file(file)
-            self.num_cities = len(xys)
-            self.cities = [ City(idx, xys[idx][0], xys[idx][1]) for idx in range(self.num_cities) ]
-            xs, ys = zip(*xys)
+            xys = list()
+            f = open(f"data/{file}", 'r')
+            nxys = f.read().split('\n') # 'n x y'
+            for nxy in nxys:
+                n, x, y = nxy.split(' ')
+                xys.append( (float(x), float(y)) )
+        else:
+            xys = None
+
+        self.xys_from_file = xys
+
+    def _get_base(self):
+        if self.xys_from_file:
+            base = self.xys_from_file[0]
+            self.base = Base(base[0], base[1])
+        else:
+            self.base = Base(self.config['base']['x'], self.config['base']['y'])
+
+    def _get_cities(self):
+        if self.xys_from_file:
+            cities = self.xys_from_file[1:]
+            self.num_cities = len(cities)
+            self.cities = [ City(idx, cities[idx][0], cities[idx][1]) for idx in range(self.num_cities) ]
+            xs, ys = zip(*cities)
             x_min, x_max, y_min, y_max = min(xs), max(xs), min(ys), max(ys)
             self.max_distance = ((x_max - x_min) ** 2 + (y_max - y_min) ** 2) ** 0.5
             self.config['x_max'] = x_max
@@ -138,14 +155,25 @@ class MTSP(Env):
             self.max_distance = (self.config['x_max'] ** 2 + self.config['y_max'] ** 2) ** 0.5
 
     def _get_robots(self):
-        self.robots = [ 
-            Robot(
-                idx,
-                self.config['robot']['x'], 
-                self.config['robot']['y'],
-                self.config['robot']['speed']
-                ) for idx in range(self.config['num_robots'])
-            ]
+        if self.xys_from_file:
+            base = self.xys_from_file[0]
+            self.robots = [ 
+                Robot(
+                    idx,
+                    base[0], 
+                    base[1],
+                    1,
+                    ) for idx in range(self.config['num_robots'])
+                ]
+        else:
+            self.robots = [ 
+                Robot(
+                    idx,
+                    self.config['robot']['x'], 
+                    self.config['robot']['y'],
+                    self.config['robot']['speed']
+                    ) for idx in range(self.config['num_robots'])
+                ]
 
     def reset(self):
         self._get_base()
@@ -154,19 +182,20 @@ class MTSP(Env):
         state = self.get_numpy_state()
         return state
 
-    def render(self):
-        plt.xlim(-5, self.config['x_max'] + 5)
-        plt.xlim(-5, self.config['y_max'] + 5)
+    def draw(self, path=None):
+        plt.cla()
+        plt.xlim(-0.25 * self.config['x_max'], self.config['x_max'] + 0.25 * self.config['x_max'])
+        plt.xlim(-0.25 * self.config['y_max'], self.config['y_max'] + 0.25 * self.config['y_max'])
 
-        plt.scatter(self.base.x, self.base.y, s=25, marker='^', color='green')
+        plt.scatter(self.base.x, self.base.y, s=50, marker='^', color='green')
         
         for city in self.cities:
             color = 'black' if city.visited_robot is None else self.robot_color_list[city.visited_robot.id]
-            plt.scatter(city.x, city.y, s=25, marker='o', color=color)
+            plt.scatter(city.x, city.y, s=50, marker='o', color=color)
 
         for idx_robot, robot in enumerate(self.robots):
             color = self.robot_color_list[idx_robot]
-            plt.scatter(robot.x, robot.y, c=color, s=100, marker='x')
+            plt.scatter(robot.x, robot.y, c=color, s=100, marker='x', label=f'r{idx_robot} ({robot.cost:.1f})')
             if not robot.assigned_city is None:
                 city = robot.assigned_city
                 plt.arrow(
@@ -187,7 +216,12 @@ class MTSP(Env):
             else:
                 plt.plot([self.base.x, robot.x], [self.base.y, robot.y], color=color)
 
-        plt.draw()
+        plt.legend(bbox_to_anchor=(0.5, 0.025, 0.5, 0.5), loc=1, borderaxespad=0., fontsize=20, framealpha=0.4)
+        if not path is None:
+            plt.savefig(path)
+
+    def render(self):
+        self.draw()
         plt.show()
 
     # update position until next assignment
@@ -208,7 +242,7 @@ class MTSP(Env):
         idx_earliest_robot = dts.argmin()
         earliest_robot = self.robots[idx_earliest_robot]
         dt = dts[idx_earliest_robot]
-        logger.info(f"dts: {dts}")
+        logger.debug(f"dts: {dts}")
 
         earliest_robot.update_distance(dt)
         is_returned_to_base = earliest_robot.finish()
@@ -271,6 +305,8 @@ class MTSP(Env):
                 robot.assigned_city is None or type(robot.assigned_city) == Base
                 )
 
+            state['avail_robot'][0, 0, idx_robot] = float(not (robot.is_assigned or robot.is_returned_to_base))
+
         for idx_city, city in enumerate(self.cities):
             state['x_b'][0, idx_city, 0] = self.config['scale_distance'] * city.distance(self.base)
             state['avail_node_presence'][0, 0, idx_city] = float(not city.is_visited)
@@ -288,14 +324,14 @@ class MTSP(Env):
                 1
                 ])
 
-        is_base_only_action = np.sum(state['avail_node_action']) == 0
+        n_remained_cities = np.sum(state['avail_node_action'])
         is_all_assignment_none_or_base = np.array(is_all_assignment_none_or_base).all()
-        if not is_all_assignment_none_or_base or is_base_only_action:
+        if (
+            n_remained_cities == 0
+            or not is_all_assignment_none_or_base
+            ):
             state['avail_node_action'][0, 0, -1] = 1
         state['avail_node_presence'][0, 0, -1] = 1
-
-        for idx_robot, robot in enumerate(self.robots):
-            state['avail_robot'][0, 0, idx_robot] = float(not (robot.is_assigned or robot.is_returned_to_base))
 
         return state
                 
@@ -307,7 +343,7 @@ class MTSP(Env):
             if robot.assigned_city is None and not robot.is_returned_to_base:
                 # Handle action 'go_base'
                 if _action == len(self.cities):
-                    logger.info(f"robot {robot.id} is going to base")
+                    logger.debug(f"robot {robot.id} is going to base")
                     robot.assign_city(self.base)
                     continue
 
@@ -318,10 +354,10 @@ class MTSP(Env):
                     + f"is_visited: {target_city.is_visited}, assigned_robot: {target_city.assigned_robot}"
                     )
                 robot.assign_city(target_city)
-                logger.info(f"robot {robot.id} is assigned to city {target_city.id}")
+                logger.debug(f"robot {robot.id} is assigned to city {target_city.id}")
 
             else: # If robot is already assigned to a city, its action should be None
-                #logger.info(_action, robot.assigned_city, robot.is_returned_to_base)
+                #logger.debug(_action, robot.assigned_city, robot.is_returned_to_base)
                 assert _action is None, (
                     f"Robot {idx} is not available!!"
                     )
