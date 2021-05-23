@@ -14,8 +14,8 @@ from envs.mtsp import MTSP, Base, City, Robot
 
 
 class MTSPSimple(MTSP):
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config_env):
+        super().__init__(config_env)
         self.config['scale_distance'] = 0.1
         self.config['scale_reward'] = 1.
     def _get_base(self):
@@ -28,7 +28,7 @@ class MTSPSimple(MTSP):
         self.config['num_cities'] = len(self.cities)
 
     def _get_robots(self):
-        self.robots = [Robot(0, 0, 5, 5), Robot(1, 0, 5, 5)]
+        self.robots = [Robot(0, 0, 5, 5)]
         self.config['num_robots'] = len(self.robots)
 
 
