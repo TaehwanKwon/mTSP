@@ -135,6 +135,7 @@ if __name__=='__main__':
     config = __import__(f'conf.{args.conf}', fromlist=[None]).config
     model = Model(config, device).to(device)
     model.initialize_batch()
+    model.set_extra_gpus()
     agent = Agent(config)
     simulator = Simulator(config, model)
 
