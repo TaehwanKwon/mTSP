@@ -12,6 +12,7 @@ import numpy as np
 
 import torch
 import torch.nn as nn
+import torch.multiprocessing as mp
 
 import logging
 logger = logging.getLogger(__name__)
@@ -284,7 +285,8 @@ class Model(nn.Module):
             state_tuple, action_tuple, reward_tuple, done_tuple, state_next_tuple, action_next_tuple = zip(*batch)
         
         self.sync_models()
-        def _get_argmax_action(model, done_tuple, state_next_tuple, argmax_action_list):
+        def _get_argmax_action(model, done_tuple, state_next_tuple, q_argmax_action_list):
+            argmax_action_list = []
             for idx, state_next in enumerate(state_next_tuple):
                 if not done_tuple[idx]:
                     if is_optimal_q_learning:
@@ -294,27 +296,30 @@ class Model(nn.Module):
                 else:
                     argmax_action = {'numpy': np.zeros([ *action_tuple[0].shape ])} # add an unused dummy action if the game is done
                 argmax_action_list.append(argmax_action['numpy'])
+            q_argmax_action_list.put(argmax_action_list)
 
         assert len(state_next_tuple) % len(self.model_list) == 0, 'Currently we only support batch size proportional to number of total gpus'
         m = len(state_next_tuple) // len(self.model_list)
-        argmax_action_lists = [ list() for _ in self.model_list ]
-        threads = []
+        q_argmax_action_list = [ mp.Queue() for _ in self.model_list ]
+        procs = []
         for idx, model in enumerate(self.model_list):
+            if idx == 0: continue
             _done_tuple = done_tuple[m * idx: m * (idx + 1)]
             _state_next_tuple = state_next_tuple[m * idx: m * (idx + 1)]
-            thread = Thread(
+            proc = mp.Process(
                 target=_get_argmax_action, 
-                args=(model, _done_tuple, _state_next_tuple, argmax_action_lists[idx])
+                args=(model, _done_tuple, _state_next_tuple, q_argmax_action_list[idx])
                 )
-            thread.start()
-            threads.append(thread)
-        
-        for thread in threads:
-            thread.join()
+            proc.start()
+            procs.append(proc)
+
+        _get_argmax_action(self.model_list[0], done_tuple[0:m], state_next_tuple[0:m], q_argmax_action_list[0])
+        for proc in procs:
+            proc.join()
         
         argmax_action_numpy_list = list()
-        for argmax_action_list in argmax_action_lists:
-            argmax_action_numpy_list.extend(argmax_action_list)
+        for q_argmax_action in q_argmax_action_list:
+            argmax_action_numpy_list.extend(q_argmax_action.get())
 
         for idx in range(self.config['learning']['size_batch']):
             for key in self.batch['state']:
