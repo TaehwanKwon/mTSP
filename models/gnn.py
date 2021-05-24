@@ -311,7 +311,7 @@ class Model(nn.Module):
             proc.start()
             procs.append(proc)
 
-        _get_argmax_action(self.model_list[0], done_tuple[0:m], state_next_tuple[0:m], q_argmax_action_list[0])
+        _get_argmax_action(self.model_list[0], done_tuple[0:m], state_next_tuple[0:m], action_tuple[0], q_argmax_action_list[0])
         for proc in procs:
             proc.join()
         
