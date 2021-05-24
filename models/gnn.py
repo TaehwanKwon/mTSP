@@ -85,7 +85,7 @@ class Model(nn.Module):
     def set_extra_gpus(self):
         self.model_list = [self]
         if self.extra_gpus:
-            self.model_list.extend( [Model(config, device=idx_gpu).to(idx_gpu) for idx_gpu in extra_gpus] )
+            self.model_list.extend( [Model(self.config, device=idx_gpu).to(idx_gpu) for idx_gpu in self.extra_gpus] )
 
     def sync_models(self):
         state_dict = self.load_state_dict
