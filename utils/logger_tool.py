@@ -7,5 +7,5 @@ class LoggerTool:
 
     def write(self, step, stats):
     	for key in stats:
-    		self.writer.add_scalar(f"{key}", step, stats[key])
+    		self.writer.add_scalar(f"stats/{key}", stats[key], step)
 
