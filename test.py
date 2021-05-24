@@ -1,9 +1,5 @@
 import os
 
-# os.environ['OMP_NUM_THREADS'] = '1'
-# os.environ['MKL_NUM_THREADS'] = '1'
-# os.environ['MKL_SERIAL'] = 'YES'
-
 from pprint import pprint
 from IPython import embed
 
@@ -24,6 +20,8 @@ torch.set_num_threads(1)
 
 import time
 from datetime import datetime
+
+import argparse
 
 def test(config, model, step_train=0, path_log=None):
     config_env = config['env_test'] if 'env_test' in config else config['env']
@@ -48,18 +46,27 @@ def test(config, model, step_train=0, path_log=None):
 
     model.config['env'] = config['env'] # Rollback the configuration of environment
 
-    return sum(costs), amplitude
+    return sum(costs), max(costs), amplitude
 
-def train(config, model, agent, simulator):
+def train(args, config, model, agent, simulator):
     now = datetime.now()
     path_log = f"logs/[{now.strftime('%y%m%d')}][{now.strftime('%H-%M-%S')}]"
     os.makedirs(path_log, exist_ok=True)
+
+    path_prev = args.path_prev
+    if path_prev:
+        state_dict = torch.load(path_prev)
+        state_dict = {key: state_dict[key].to(device) for key in state_dict}
+        model.load_state_dict(state_dict)
+        f = open(f"{path_log}/comment.txt", 'w')
+        f.write(path_prev)
+        f.close()
     
     optimizer = Adam(model.parameters(), lr=config['learning']['lr'])
     logger_tool = LoggerTool(path_log)
 
     _time_10_step = time.time()
-    simulator.save_to_replay_buffer(config['learning']['size_replay_buffer'])
+    simulator.save_to_replay_buffer(config['learning']['size_replay_buffer'] // 2)
     logger.info("###### Start training #####")
     for step_train in range(config['learning']['step'] + 1):
         _time_train = time.time()
@@ -73,9 +80,6 @@ def train(config, model, agent, simulator):
 
         time_train = time.time() - _time_train
 
-        # adding new data to replay buffer
-        simulator.save_to_replay_buffer(config['learning']['size_batch'])
-
         if step_train % 10 == 0:
             # showing and writing loss
             time_10_step = time.time() - _time_10_step
@@ -84,12 +88,17 @@ def train(config, model, agent, simulator):
                 + f"time_10_step: {time_10_step:.2f} "
                 )
             _time_10_step = time.time()
+
+        if step_train % 200 == 0:
+            # adding new data to replay buffer
+            simulator.save_to_replay_buffer(config['learning']['size_batch'])
             
         if step_train % 100 == 0:
             # Test the performance of the training agent
-            score, amplitude = test(config, model, step_train=step_train, path_log=path_log)
+            total_cost, max_cost, amplitude = test(config, model, step_train=step_train, path_log=path_log)
             print(
-                f"cost: {score} "
+                f"toptal_cost: {total_cost} "
+                + f"max_cost: {max_cost} "
                 + f"amplitude: {amplitude} "
                     )
             logger_tool.write(
@@ -97,7 +106,8 @@ def train(config, model, agent, simulator):
                 {
                     'loss': loss,
                     'training_time': time_train,
-                    'score': score,
+                    'total_cost': total_cost,
+                    'max_cost': max_cost,
                     'amplitude': amplitude,
                     }
                 )
@@ -112,16 +122,24 @@ def train(config, model, agent, simulator):
 if __name__=='__main__':
     mp.set_start_method('spawn')
     device = 'cuda:0'
-    #device = 'cpu'
 
-    config = __import__('conf.conf-kth', fromlist=[None]).config
+    parser = argparse.ArgumentParser(description='train_mtsp')
+    parser.add_argument('--path_prev', type=str, 
+                        help='path to previous model')
+    parser.add_argument('--conf', type=str, 
+                        help='conf to be used for training')
+    args = parser.parse_args()
+    print(args)
+    
+
+    config = __import__(f'conf.{args.conf}', fromlist=[None]).config
     model = Model(config, device).to(device)
     model.initialize_batch()
     agent = Agent(config)
     simulator = Simulator(config, model)
 
     try:
-        train(config, model, agent, simulator)
+        train(args, config, model, agent, simulator)
     except KeyboardInterrupt:
         # terminate processes generated for collecting data
         simulator.terminate()
