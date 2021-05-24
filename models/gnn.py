@@ -50,10 +50,7 @@ def _get_argmax_action(model, done_tuple, state_next_tuple, q_argmax_action_list
     argmax_action_list = []
     for idx, state_next in enumerate(state_next_tuple):
         if not done_tuple[idx]:
-            if is_optimal_q_learning:
-                argmax_action = self.action(state_next)
-            else:
-                argmax_action = action_next_tuple[idx]
+            argmax_action = self.action(state_next)
         else:
             argmax_action = {'numpy': np.zeros([ *action_tuple[0].shape ])} # add an unused dummy action if the game is done
         argmax_action_list.append(argmax_action['numpy'])
