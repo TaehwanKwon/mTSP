@@ -185,7 +185,7 @@ class MTSP(Env):
     def draw(self, path=None):
         plt.cla()
         plt.xlim(-0.25 * self.config['x_max'], self.config['x_max'] + 0.25 * self.config['x_max'])
-        plt.xlim(-0.25 * self.config['y_max'], self.config['y_max'] + 0.25 * self.config['y_max'])
+        plt.ylim(-0.25 * self.config['y_max'], self.config['y_max'] + 0.25 * self.config['y_max'])
 
         plt.scatter(self.base.x, self.base.y, s=50, marker='^', color='green')
         
