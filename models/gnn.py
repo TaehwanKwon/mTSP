@@ -297,8 +297,8 @@ class Model(nn.Module):
         
         self.sync_models()
 
-        assert len(state_next_tuple) % len(self.model_list) == 0, 'Currently we only support batch size proportional to number of total gpus'
-        m = len(state_next_tuple) // len(self.model_list)
+        assert len(state_next_tuple) % self.config['learning']['num_processes'] == 0, 'Currently we only support batch size proportional to number of total gpus'
+        m = len(state_next_tuple) // self.config['learning']['num_processes']
         q_argmax_action_list = [ mp.Queue() for _ in self.model_list ]
         procs = []
         for idx_data in range(self.config['learning']['num_processes']):

@@ -24,7 +24,7 @@ import time
 
 def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, q_model):
     
-    model = Model(config, idx).to(idx)
+    model = Model(config, 0).to(0)
 
     env = eval(f"{config['env']['name']}(config['env'])")
     s = env.reset()
@@ -47,13 +47,14 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
             flag_models = q_flag_models.get()
             if flag_models[idx]:
                 flag_models[idx] = False
-            q_flag_models.put(flag_models)
+                q_flag_models.put(flag_models)
             
-            if flag_models[idx]:
                 state_dict_cpu = q_model.get()
                 q_model.put(state_dict_cpu)
-                state_dict_gpu = {key: state_dict_cpu[key].to(idx) for key in state_dict_cpu}
-                model.load_state_dict(state_dict_gpu)        
+                state_dict_gpu = {key: state_dict_cpu[key].to(0) for key in state_dict_cpu}
+                model.load_state_dict(state_dict_gpu)
+            else:
+                q_flag_models.put(flag_models)
 
             for _ in range(_num_collection):
                 if np.random.rand() < eps:
@@ -74,6 +75,7 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
             _done_tuple, _state_next_tuple, _action = data_argmax
             argmax_action_list = _get_argmax_action(model, _done_tuple, _state_next_tuple, _action)
             q_data.put( (idx_data, argmax_action_list) )
+
 
         time.sleep(1e-3)
 
