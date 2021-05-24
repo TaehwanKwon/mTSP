@@ -41,6 +41,7 @@ def get_data(idx, config, q_data, q_count, q_eps, q_flag_models, q_model):
         
         if flag_models[idx]:
             state_dict_cpu = q_model.get()
+            q_model.put(state_dict_cpu)
             state_dict_gpu = {key: state_dict_cpu[key].to(idx) for key in state_dict_cpu}
             model.load_state_dict(state_dict_gpu)
 
