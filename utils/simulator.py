@@ -111,17 +111,11 @@ class Simulator:
     def __init__(self, config, model):
         self.config = config
         self.model = model # Should be sheard by model.shared_memory()
-        if self.model.device == 'cpu':
-            self.model_cpu = self.model
-        else:
-            #self.model_cpu = copy.deepcopy(self.model).cpu()
-            #self.model_cpu.device = 'cpu'
-            self.model_cpu = self.model
-        self.model_cpu.share_memory()
 
         self.q_data = mp.Queue()
         self.q_count = mp.Queue()
         self.q_eps = mp.Queue()
+        self.q_model = mp.Queue()
 
         self.procs = []
         for _ in range(self.config['learning']['num_processes']):
