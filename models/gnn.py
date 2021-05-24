@@ -48,7 +48,7 @@ class Model(nn.Module):
     def __init__(self, config, device='cpu'):
         super().__init__()
         self.config = config
-        self.tau = 1.
+        self.tau = 2.
         self.base_hidden_size = 64
         self.bias = True
         self.sigma = 1e-1
@@ -156,6 +156,7 @@ class Model(nn.Module):
             gamma = torch.relu(self.fc_l_2(l_2) + self.fc_x_2(u_concat)) # (n_batch, n_nodes, 2 * self.base_hidden_size)
 
         Q_utility = self.fc_Q(gamma) # (n_batch, n_nodes, 1)
+        Q_utility = Q_utility * avail_node_presence.transpose(1,2) # Visited nodes are eliminated from graph
         Q = torch.sum(Q_utility, dim=1) # (n_batch, 1)
 
         return Q
@@ -253,7 +254,6 @@ class Model(nn.Module):
         batch = self.replay_buffer.sample()
         is_optimal_q_learning = len(batch[0]) == 5
         is_sarsa = len(batch[0]) == 6
-        
         if is_optimal_q_learning:
             state_tuple, action_tuple, reward_tuple, done_tuple, state_next_tuple = zip(*batch)
         elif is_sarsa:
