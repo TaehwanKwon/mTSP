@@ -46,6 +46,18 @@ class ReplayBuffer:
             )
         return random.sample(self.buffer, self.config['learning']['size_batch'])
 
+def _get_argmax_action(model, done_tuple, state_next_tuple, q_argmax_action_list):
+    argmax_action_list = []
+    for idx, state_next in enumerate(state_next_tuple):
+        if not done_tuple[idx]:
+            if is_optimal_q_learning:
+                argmax_action = self.action(state_next)
+            else:
+                argmax_action = action_next_tuple[idx]
+        else:
+            argmax_action = {'numpy': np.zeros([ *action_tuple[0].shape ])} # add an unused dummy action if the game is done
+        argmax_action_list.append(argmax_action['numpy'])
+    q_argmax_action_list.put(argmax_action_list)
 
 class Model(nn.Module):
     def __init__(self, config, device='cpu', extra_gpus=None):
@@ -285,18 +297,7 @@ class Model(nn.Module):
             state_tuple, action_tuple, reward_tuple, done_tuple, state_next_tuple, action_next_tuple = zip(*batch)
         
         self.sync_models()
-        def _get_argmax_action(model, done_tuple, state_next_tuple, q_argmax_action_list):
-            argmax_action_list = []
-            for idx, state_next in enumerate(state_next_tuple):
-                if not done_tuple[idx]:
-                    if is_optimal_q_learning:
-                        argmax_action = self.action(state_next)
-                    else:
-                        argmax_action = action_next_tuple[idx]
-                else:
-                    argmax_action = {'numpy': np.zeros([ *action_tuple[0].shape ])} # add an unused dummy action if the game is done
-                argmax_action_list.append(argmax_action['numpy'])
-            q_argmax_action_list.put(argmax_action_list)
+
 
         assert len(state_next_tuple) % len(self.model_list) == 0, 'Currently we only support batch size proportional to number of total gpus'
         m = len(state_next_tuple) // len(self.model_list)
