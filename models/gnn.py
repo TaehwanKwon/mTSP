@@ -29,7 +29,7 @@ def _get_argmax_action(model, done_tuple, state_next_tuple, action):
             argmax_action = {'numpy': np.zeros([ *action.shape ])} # add an unused dummy action if the game is done
         argmax_action_list.append(argmax_action['numpy'])
     
-    return argmax_actoin_list
+    return argmax_action_list
 
 class ReplayBuffer:
     def __init__(self, config):
@@ -301,22 +301,21 @@ class Model(nn.Module):
         m = len(state_next_tuple) // len(self.model_list)
         q_argmax_action_list = [ mp.Queue() for _ in self.model_list ]
         procs = []
-        for idx_data in range(self.config['num_processes']):
-            _done_tuple = done_tuple[m * idx: m * (idx + 1)]
-            _state_next_tuple = state_next_tuple[m * idx: m * (idx + 1)]
+        for idx_data in range(self.config['learning']['num_processes']):
+            _done_tuple = done_tuple[m * idx_data: m * (idx_data + 1)]
+            _state_next_tuple = state_next_tuple[m * idx_data: m * (idx_data + 1)]
             q_data_argmax = (_done_tuple, _state_next_tuple, action_tuple[0])
             self.simulator.q_data_argmax.put( (idx_data, q_data_argmax) )
         
-        argmax_action_numpy_list = [None for _ in range(self.config['num_processes'])]
-        for _ in range(self.config['num_processes']):
+        argmax_action_numpy_list = [None for _ in range(self.config['learning']['num_processes'])]
+        for _ in range(self.config['learning']['num_processes']):
             idx_data, argmax_action_numpy = self.simulator.q_data.get()
             argmax_action_numpy_list[idx_data] = argmax_action_numpy
-
-        argmax_action_numpy_list.sort()
+            
         _argmax_action_numpy_list = list()
-        for idx_data, argmax_action_numpy in argmax_action_numy_list:
+        for argmax_action_numpy in argmax_action_numpy_list:
             _argmax_action_numpy_list += argmax_action_numpy
-        aargmax_action_numpy_list = _argmax_action_numpy_list
+        argmax_action_numpy_list = _argmax_action_numpy_list
 
         for idx in range(self.config['learning']['size_batch']):
             for key in self.batch['state']:

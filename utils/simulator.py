@@ -71,8 +71,8 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
         
         elif q_data_argmax.qsize() > 0:
             idx_data, data_argmax =  q_data_argmax.get()
-            _done_tuple, state_next_tuple, action = data_argmax
-            argmax_action_list = _get_argmax_action(model, done_tuple, state_next_tuple, action):
+            _done_tuple, _state_next_tuple, _action = data_argmax
+            argmax_action_list = _get_argmax_action(model, _done_tuple, _state_next_tuple, _action)
             q_data.put( (idx_data, argmax_action_list) )
 
         time.sleep(1e-3)
@@ -152,7 +152,7 @@ class Simulator:
 
             proc = mp.Process(
                 target = target_func, 
-                args = (idx, self.config, self.q_data, self.q_count, self.q_eps, self.q_flag_models, self.q_model)
+                args = (idx, self.config, self.q_data, self.q_data_argmax, self.q_count, self.q_eps, self.q_flag_models, self.q_model)
                 )
             proc.start()
             self.procs.append(proc)

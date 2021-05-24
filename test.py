@@ -66,7 +66,7 @@ def train(args, config, model, agent, simulator):
     logger_tool = LoggerTool(path_log)
 
     _time_10_step = time.time()
-    simulator.save_to_replay_buffer(config['learning']['size_replay_buffer'] // 2)
+    simulator.save_to_replay_buffer(config['learning']['size_replay_buffer'])
     logger.info("###### Start training #####")
     for step_train in range(config['learning']['step'] + 1):
         _time_train = time.time()
@@ -133,12 +133,13 @@ if __name__=='__main__':
     
 
     config = __import__(f'conf.{args.conf}', fromlist=[None]).config
-    model = Model(config, device, extra_gpus=[1, 2, 3]).to(device)
+    model = Model(config, device).to(device)
     model.initialize_batch()
-    model.set_extra_gpus()
+    model.set_extra_gpus()    
     agent = Agent(config)
     simulator = Simulator(config, model)
-
+    model.simulator = simulator
+    
     try:
         train(args, config, model, agent, simulator)
     except KeyboardInterrupt:
