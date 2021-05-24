@@ -16,6 +16,8 @@ import torch.nn as nn
 import logging
 logger = logging.getLogger(__name__)
 
+from threading import Thread
+
 class ReplayBuffer:
     def __init__(self, config):
         self.config = copy.deepcopy(config)
@@ -45,7 +47,7 @@ class ReplayBuffer:
 
 
 class Model(nn.Module):
-    def __init__(self, config, device='cpu'):
+    def __init__(self, config, device='cpu', extra_gpus=None):
         super().__init__()
         self.config = config
         self.tau = 2.
@@ -77,6 +79,28 @@ class Model(nn.Module):
         self.replay_buffer = ReplayBuffer(config)
         self.device = device
         self.step_train = 0
+
+        self.extra_gpus = extra_gpus
+
+    def set_extra_gpus(self):
+        self.model_list [self]
+        if self.extra_gpus:
+            self.model_list.extend( [Model(config, device=idx_gpu).to(idx_gpu) for idx_gpu in extra_gpus] )
+
+    def sync_models(self):
+        state_dict = self.load_state_dict
+        def _sync_model(model, state_dict):
+            _state_dict = {key: state_dict[key].to(model.device) for key in state_dict}
+            model.load_state_dict(_state_dict)
+
+        threads = list()
+        for model in self.model_list[1:]:
+            thread = Thread(target=_sync_model, args=(model, state_dict))
+            thread.start()
+            threads.append(thread)
+
+        for thread in threads:
+            thread.join()
 
     def forward(self, state, action):
         ''' 
@@ -259,16 +283,37 @@ class Model(nn.Module):
         elif is_sarsa:
             state_tuple, action_tuple, reward_tuple, done_tuple, state_next_tuple, action_next_tuple = zip(*batch)
         
-        argmax_action_numpy_list = []
-        for idx, state_next in enumerate(state_next_tuple):
-            if not done_tuple[idx]:
-                if is_optimal_q_learning:
-                    argmax_action = self.action(state_next)
+        self.sync_models()
+        def _get_argmax_action(model, done_tuple, state_next_tuple, argmax_action_list):
+            for idx, state_next in enmerate(state_next_tuple):
+                if not done_tuple[idx]:
+                    if is_optimal_q_learning:
+                        argmax_action = self.action(state_next)
+                    else:
+                        argmax_action = action_next_tuple[idx]
                 else:
-                    argmax_action = action_next_tuple[idx]
-            else:
-                argmax_action = {'numpy': np.zeros([ *action_tuple[0].shape ])} # add an unused dummy action if the game is done
-            argmax_action_numpy_list.append(argmax_action['numpy'])
+                    argmax_action = {'numpy': np.zeros([ *action_tuple[0].shape ])} # add an unused dummy action if the game is done
+                argmax_action_list.append(argmax_action)
+
+        assert len(state_next_tuple) % len(self.models) == 0, 'Currently we only support batch size proportional to number of total gpus'
+        m = len(state_next_tuple) // len(self.models)
+        argmax_action_lists = [ list() for _ in self.models ]
+        threads = []
+        for idx, model in enmuerate(self.models):
+            _done_tuple = done_tuple[m * idx: m * (idx + 1)]
+            _state_next_tuple = state_next_tuple[m * idx: m * (idx + 1)]
+            thread = Thread(
+                target=_get_argmax_action, 
+                args=(model, _done_tuple, _state_next_tuple, argmax_action_lists[idx])
+                )
+            thread.start()
+            threads.append(thread)
+        
+        for thread in threads:
+            thread.join()
+        argmax_action_numpy_list = list()
+        for argmax_action_list in argmax_action_lists:
+            argmax_action_numpy_list.extend(argmax_action_list)
 
         for idx in range(self.config['learning']['size_batch']):
             for key in self.batch['state']:
