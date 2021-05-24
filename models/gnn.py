@@ -285,7 +285,7 @@ class Model(nn.Module):
         
         self.sync_models()
         def _get_argmax_action(model, done_tuple, state_next_tuple, argmax_action_list):
-            for idx, state_next in enmerate(state_next_tuple):
+            for idx, state_next in enumerate(state_next_tuple):
                 if not done_tuple[idx]:
                     if is_optimal_q_learning:
                         argmax_action = self.action(state_next)
@@ -293,13 +293,13 @@ class Model(nn.Module):
                         argmax_action = action_next_tuple[idx]
                 else:
                     argmax_action = {'numpy': np.zeros([ *action_tuple[0].shape ])} # add an unused dummy action if the game is done
-                argmax_action_list.append(argmax_action)
+                argmax_action_list.append(argmax_action['numpy'])
 
         assert len(state_next_tuple) % len(self.model_list) == 0, 'Currently we only support batch size proportional to number of total gpus'
         m = len(state_next_tuple) // len(self.model_list)
         argmax_action_lists = [ list() for _ in self.model_list ]
         threads = []
-        for idx, model in enmuerate(self.model_list):
+        for idx, model in enumerate(self.model_list):
             _done_tuple = done_tuple[m * idx: m * (idx + 1)]
             _state_next_tuple = state_next_tuple[m * idx: m * (idx + 1)]
             thread = Thread(
@@ -311,6 +311,7 @@ class Model(nn.Module):
         
         for thread in threads:
             thread.join()
+        
         argmax_action_numpy_list = list()
         for argmax_action_list in argmax_action_lists:
             argmax_action_numpy_list.extend(argmax_action_list)
