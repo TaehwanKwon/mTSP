@@ -75,7 +75,7 @@ def get_data2(idx, config, q_data, q_count, q_eps, q_flag_models, q_model):
     s = env.reset()
     s_prev,  action_prev, reward_prev, done_prev = None, None, None, None
 
-    num_collection = 50
+    num_collection = 100
 
     while True:
         count = q_count.get()
