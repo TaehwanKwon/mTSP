@@ -295,11 +295,11 @@ class Model(nn.Module):
                     argmax_action = {'numpy': np.zeros([ *action_tuple[0].shape ])} # add an unused dummy action if the game is done
                 argmax_action_list.append(argmax_action)
 
-        assert len(state_next_tuple) % len(self.models) == 0, 'Currently we only support batch size proportional to number of total gpus'
-        m = len(state_next_tuple) // len(self.models)
-        argmax_action_lists = [ list() for _ in self.models ]
+        assert len(state_next_tuple) % len(self.model_list) == 0, 'Currently we only support batch size proportional to number of total gpus'
+        m = len(state_next_tuple) // len(self.model_list)
+        argmax_action_lists = [ list() for _ in self.model_list ]
         threads = []
-        for idx, model in enmuerate(self.models):
+        for idx, model in enmuerate(self.model_list):
             _done_tuple = done_tuple[m * idx: m * (idx + 1)]
             _state_next_tuple = state_next_tuple[m * idx: m * (idx + 1)]
             thread = Thread(
