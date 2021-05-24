@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 import time
 
 def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, q_model):
-    
-    model = Model(config, idx).to(idx)
+    device = idx % torch.cuda.device_count()
+    model = Model(config, device).to(device)
 
     env = eval(f"{config['env']['name']}(config['env'])")
     s = env.reset()
@@ -51,7 +51,7 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
             
                 state_dict_cpu = q_model.get()
                 q_model.put(state_dict_cpu)
-                state_dict_gpu = {key: state_dict_cpu[key].to(idx) for key in state_dict_cpu}
+                state_dict_gpu = {key: state_dict_cpu[key].to(device) for key in state_dict_cpu}
                 model.load_state_dict(state_dict_gpu)
             else:
                 q_flag_models.put(flag_models)
