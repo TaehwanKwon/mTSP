@@ -83,7 +83,7 @@ class Model(nn.Module):
         self.extra_gpus = extra_gpus
 
     def set_extra_gpus(self):
-        self.model_list [self]
+        self.model_list = [self]
         if self.extra_gpus:
             self.model_list.extend( [Model(config, device=idx_gpu).to(idx_gpu) for idx_gpu in extra_gpus] )
 
