@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 import time
 
+
 def get_data(model_shared, config, q_data, q_count, q_eps):
     
     model = model_shared
@@ -57,7 +58,7 @@ def get_data(model_shared, config, q_data, q_count, q_eps):
             else:
                 s = s_next
 
-def get_data2(model_shared, config, q_data, q_count, q_eps):
+def get_data_sarsa(model_shared, config, q_data, q_count, q_eps):
     
     model = model_shared
 
@@ -130,7 +131,7 @@ class Simulator:
             if learning_algorithm == 'optimal_q_learning':
                 target_func = get_data 
             elif learning_algorithm == 'sarsa':
-                target_func = get_data2
+                target_func = get_data_sarsa
 
             assert not target_func is None, f"Invalid algorithm is set for learning: {learning_algorithm}"
 
