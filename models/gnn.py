@@ -19,6 +19,18 @@ logger = logging.getLogger(__name__)
 
 from threading import Thread
 
+def _get_argmax_action(model, done_tuple, state_next_tuple, action):
+
+    argmax_action_list = []
+    for idx, state_next in enumerate(state_next_tuple):
+        if not done_tuple[idx]:
+            argmax_action = model.action(state_next)
+        else:
+            argmax_action = {'numpy': np.zeros([ *action.shape ])} # add an unused dummy action if the game is done
+        argmax_action_list.append(argmax_action['numpy'])
+    
+    return argmax_actoin_list
+
 class ReplayBuffer:
     def __init__(self, config):
         self.config = copy.deepcopy(config)
@@ -45,16 +57,6 @@ class ReplayBuffer:
             + f"currently {len(self.buffer)}"
             )
         return random.sample(self.buffer, self.config['learning']['size_batch'])
-
-def _get_argmax_action(model, done_tuple, state_next_tuple, action, q_argmax_action_list):
-    argmax_action_list = []
-    for idx, state_next in enumerate(state_next_tuple):
-        if not done_tuple[idx]:
-            argmax_action = model.action(state_next)
-        else:
-            argmax_action = {'numpy': np.zeros([ *action.shape ])} # add an unused dummy action if the game is done
-        argmax_action_list.append(argmax_action['numpy'])
-    q_argmax_action_list.put(argmax_action_list)
 
 class Model(nn.Module):
     def __init__(self, config, device='cpu', extra_gpus=None):
@@ -295,29 +297,26 @@ class Model(nn.Module):
         
         self.sync_models()
 
-
         assert len(state_next_tuple) % len(self.model_list) == 0, 'Currently we only support batch size proportional to number of total gpus'
         m = len(state_next_tuple) // len(self.model_list)
         q_argmax_action_list = [ mp.Queue() for _ in self.model_list ]
         procs = []
-        for idx, model in enumerate(self.model_list):
-            if idx == 0: continue
+        for idx_data in range(self.config['num_processes']):
             _done_tuple = done_tuple[m * idx: m * (idx + 1)]
             _state_next_tuple = state_next_tuple[m * idx: m * (idx + 1)]
-            proc = mp.Process(
-                target=_get_argmax_action, 
-                args=(model, _done_tuple, _state_next_tuple, action_tuple[0], q_argmax_action_list[idx])
-                )
-            proc.start()
-            procs.append(proc)
-
-        _get_argmax_action(self.model_list[0], done_tuple[0:m], state_next_tuple[0:m], action_tuple[0], q_argmax_action_list[0])
-        for proc in procs:
-            proc.join()
+            q_data_argmax = (_done_tuple, _state_next_tuple, action_tuple[0])
+            self.simulator.q_data_argmax.put( (idx_data, q_data_argmax) )
         
-        argmax_action_numpy_list = list()
-        for q_argmax_action in q_argmax_action_list:
-            argmax_action_numpy_list.extend(q_argmax_action.get())
+        argmax_action_numpy_list = [None for _ in range(self.config['num_processes'])]
+        for _ in range(self.config['num_processes']):
+            idx_data, argmax_action_numpy = self.simulator.q_data.get()
+            argmax_action_numpy_list[idx_data] = argmax_action_numpy
+
+        argmax_action_numpy_list.sort()
+        _argmax_action_numpy_list = list()
+        for idx_data, argmax_action_numpy in argmax_action_numy_list:
+            _argmax_action_numpy_list += argmax_action_numpy
+        aargmax_action_numpy_list = _argmax_action_numpy_list
 
         for idx in range(self.config['learning']['size_batch']):
             for key in self.batch['state']:
