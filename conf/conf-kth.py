@@ -24,15 +24,15 @@ config = {
     # 'env_test':{
     #     'name':'MTSP',
     #     'num_robots': 2,
-    #     'num_cities': 51,
-    #     'file': 'berlin52.txt',
-    #     'scale_distance': 0.01,
-    #     'scale_reward':0.01,
+    #     'num_cities': 20,
+    #     'file': 'berlin21.txt',
+    #     'scale_distance': 1e-3,
+    #     'scale_reward':1e-3,
     # },
     'learning':{
         'step': 100000,
-        #'algorithm': 'optimal_q_learning',
-        'algorithm': 'sarsa',
+        'algorithm': 'optimal_q_learning',
+        #'algorithm': 'sarsa',
         'lr': 2.5e-4,
         'eps': { # eps = eps_end + eps_add * half_life / (half_life + training_step)
             'add': 0.45,
@@ -43,6 +43,5 @@ config = {
         'size_batch': 128,
         'size_replay_buffer': 128,
         'num_processes': 4,
-        'num_threads': 4,
     }
 }
