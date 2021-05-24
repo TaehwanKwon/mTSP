@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 
 import time
 
-def get_data(model_shared, config, q_data, q_count, q_eps):
+def get_data(idx, config, q_data, q_count, q_eps, q_flag_models, q_model):
     
-    model = model_shared
+    model = Model(config, idx).to(idx)
 
     env = eval(f"{config['env']['name']}(config['env'])")
     s = env.reset()
@@ -34,6 +34,15 @@ def get_data(model_shared, config, q_data, q_count, q_eps):
     while True:
         count = q_count.get()
         eps = q_eps.get(); q_eps.put(eps)
+        flag_models = q_flag_models.get()
+        if flag_models[idx]:
+            flag_models[idx] = False
+        q_flag_models.put(flag_models)
+        
+        if flag_models[idx]:
+            state_dict_cpu = q_model.get()
+            state_dict_gpu = {key: state_dict_cpu[key].to(idx) for key in state_dict_cpu}
+            model.load_state_dict(state_dict_gpu)
 
         if count >= num_collection:
             count = count - num_collection
@@ -57,7 +66,7 @@ def get_data(model_shared, config, q_data, q_count, q_eps):
             else:
                 s = s_next
 
-def get_data2(model_shared, config, q_data, q_count, q_eps):
+def get_data2(idx, config, q_data, q_count, q_eps, q_flag_models, q_model):
     
     model = model_shared
 
@@ -116,9 +125,10 @@ class Simulator:
         self.q_count = mp.Queue()
         self.q_eps = mp.Queue()
         self.q_model = mp.Queue()
+        self.q_flag_models = mp.Queue()
 
-        self.procs = []
-        for _ in range(self.config['learning']['num_processes']):
+        self.procs = list()
+        for idx in range(self.config['learning']['num_processes']):
             target_func = None
             learning_algorithm = self.config['learning']['algorithm']
             if learning_algorithm == 'optimal_q_learning':
@@ -130,7 +140,7 @@ class Simulator:
 
             proc = mp.Process(
                 target = target_func, 
-                args = (self.model_cpu, self.config, self.q_data, self.q_count, self.q_eps,)
+                args = (idx, self.config, self.q_data, self.q_count, self.q_eps, self.q_flag_models, self.q_model)
                 )
             proc.start()
             self.procs.append(proc)
@@ -142,18 +152,21 @@ class Simulator:
         eps = eps_end +  eps_add * half_life / (half_life + self.model.step_train)
         return eps
 
-    def sync_model(self):
-        if not self.model.device == 'cpu':
-            state_dict = self.model.state_dict()
-            state_dict = { key: state_dict[key].cpu() for key in state_dict }
-            self.model_cpu.load_state_dict(state_dict)
+    def get_state_dict_cpu(self):
+        state_dict = self.model.state_dict()
+        state_dict = { key: state_dict[key].cpu() for key in state_dict }
+
+        return state_dict
 
     def save_to_replay_buffer(self, size):
         num_data = size
         eps = self.get_eps()
-        self.sync_model()
+        state_dict_cpu = self.get_state_dict_cpu()
+
         self.q_count.put(size)
         self.q_eps.put(eps)
+        self.q_model.put(state_dict_cpu)
+        self.q_flag_models.put( [True for _ in range(self.config['learning']['num_processes'])] )
 
         while num_data > 0:
             if num_data % 100 == 0:
