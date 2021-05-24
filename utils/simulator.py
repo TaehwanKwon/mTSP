@@ -34,6 +34,15 @@ def get_data(idx, config, q_data, q_count, q_eps, q_flag_models, q_model):
     while True:
         count = q_count.get()
         eps = q_eps.get(); q_eps.put(eps)
+
+        if count >= num_collection:
+            count = count - num_collection
+            _num_collection = num_collection
+            q_count.put(count)
+        else:
+            _num_collection = count
+            count = 0
+
         flag_models = q_flag_models.get()
         if flag_models[idx]:
             flag_models[idx] = False
@@ -43,15 +52,7 @@ def get_data(idx, config, q_data, q_count, q_eps, q_flag_models, q_model):
             state_dict_cpu = q_model.get()
             q_model.put(state_dict_cpu)
             state_dict_gpu = {key: state_dict_cpu[key].to(idx) for key in state_dict_cpu}
-            model.load_state_dict(state_dict_gpu)
-
-        if count >= num_collection:
-            count = count - num_collection
-            _num_collection = num_collection
-            q_count.put(count)
-        else:
-            _num_collection = count
-            count = 0
+            model.load_state_dict(state_dict_gpu)        
 
         for _ in range(_num_collection):
             if np.random.rand() < eps:
