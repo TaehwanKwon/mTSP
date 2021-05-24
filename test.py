@@ -114,7 +114,9 @@ def train(args, config, model, agent, simulator):
 
         # saving model
         if step_train > 1 and step_train % 1000 == 0:
-            torch.save(simulator.model_cpu.state_dict(), f"{path_log}/model_{step_train}.pt")
+            state_dict = model.state_dict()
+            state_dict_cpu = {key: state_dict[key].cpu() for key in state_dict}
+            torch.save(state_dict_cpu, f"{path_log}/model_{step_train}.pt")
 
     # kill spawned processes
     simulator.terminate()
