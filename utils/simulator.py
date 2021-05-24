@@ -8,7 +8,7 @@ sys.path.append(os.path.abspath( os.path.join(os.path.dirname(__file__), "..")))
 # os.environ['MKL_SERIAL'] = 'YES'
 
 from envs.mtsp_simple import MTSP, MTSPSimple
-from models.gnn import Model
+from models.gnn import Model, _get_argmax_action
 
 import numpy as np
 import torch
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 import time
 
-def get_data(idx, config, q_data, q_count, q_eps, q_flag_models, q_model):
+def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, q_model):
     
     model = Model(config, idx).to(idx)
 
@@ -32,41 +32,50 @@ def get_data(idx, config, q_data, q_count, q_eps, q_flag_models, q_model):
     num_collection = 50
 
     while True:
-        count = q_count.get()
-        eps = q_eps.get(); q_eps.put(eps)
+        if q_count.qsize() > 0:
+            count = q_count.get()
+            eps = q_eps.get(); q_eps.put(eps)
 
-        if count >= num_collection:
-            count = count - num_collection
-            _num_collection = num_collection
-            q_count.put(count)
-        else:
-            _num_collection = count
-            count = 0
+            if count >= num_collection:
+                count = count - num_collection
+                _num_collection = num_collection
+                q_count.put(count)
+            else:
+                _num_collection = count
+                count = 0
 
-        flag_models = q_flag_models.get()
-        if flag_models[idx]:
-            flag_models[idx] = False
-        q_flag_models.put(flag_models)
+            flag_models = q_flag_models.get()
+            if flag_models[idx]:
+                flag_models[idx] = False
+            q_flag_models.put(flag_models)
+            
+            if flag_models[idx]:
+                state_dict_cpu = q_model.get()
+                q_model.put(state_dict_cpu)
+                state_dict_gpu = {key: state_dict_cpu[key].to(idx) for key in state_dict_cpu}
+                model.load_state_dict(state_dict_gpu)        
+
+            for _ in range(_num_collection):
+                if np.random.rand() < eps:
+                    action = model.random_action(s)
+                else:
+                    action = model.action(s)
+                s_next, reward, done = env.step(action['list'])
+                sards = (s, action['numpy'], reward, done, s_next)
+                q_data.put(sards)
+
+                if done:
+                    s = env.reset()
+                else:
+                    s = s_next
         
-        if flag_models[idx]:
-            state_dict_cpu = q_model.get()
-            q_model.put(state_dict_cpu)
-            state_dict_gpu = {key: state_dict_cpu[key].to(idx) for key in state_dict_cpu}
-            model.load_state_dict(state_dict_gpu)        
+        elif q_data_argmax.qsize() > 0:
+            idx_data, data_argmax =  q_data_argmax.get()
+            _done_tuple, state_next_tuple, action = data_argmax
+            argmax_action_list = _get_argmax_action(model, done_tuple, state_next_tuple, action):
+            q_data.put( (idx_data, argmax_action_list) )
 
-        for _ in range(_num_collection):
-            if np.random.rand() < eps:
-                action = model.random_action(s)
-            else:
-                action = model.action(s)
-            s_next, reward, done = env.step(action['list'])
-            sards = (s, action['numpy'], reward, done, s_next)
-            q_data.put(sards)
-
-            if done:
-                s = env.reset()
-            else:
-                s = s_next
+        time.sleep(1e-3)
 
 def get_data2(idx, config, q_data, q_count, q_eps, q_flag_models, q_model):
     
@@ -124,6 +133,7 @@ class Simulator:
         self.model = model # Should be sheard by model.shared_memory()
 
         self.q_data = mp.Queue()
+        self.q_data_argmax = mp.Queue()
         self.q_count = mp.Queue()
         self.q_eps = mp.Queue()
         self.q_model = mp.Queue()
