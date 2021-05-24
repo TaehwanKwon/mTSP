@@ -66,7 +66,7 @@ def train(args, config, model, agent, simulator):
     logger_tool = LoggerTool(path_log)
 
     _time_10_step = time.time()
-    simulator.save_to_replay_buffer(config['learning']['size_replay_buffer'] // 2)
+    simulator.save_to_replay_buffer(config['learning']['size_replay_buffer'])
     logger.info("###### Start training #####")
     for step_train in range(config['learning']['step'] + 1):
         _time_train = time.time()
