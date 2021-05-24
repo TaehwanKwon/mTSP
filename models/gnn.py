@@ -46,13 +46,13 @@ class ReplayBuffer:
             )
         return random.sample(self.buffer, self.config['learning']['size_batch'])
 
-def _get_argmax_action(model, done_tuple, state_next_tuple, q_argmax_action_list):
+def _get_argmax_action(model, done_tuple, state_next_tuple, action, q_argmax_action_list):
     argmax_action_list = []
     for idx, state_next in enumerate(state_next_tuple):
         if not done_tuple[idx]:
             argmax_action = model.action(state_next)
         else:
-            argmax_action = {'numpy': np.zeros([ *action_tuple[0].shape ])} # add an unused dummy action if the game is done
+            argmax_action = {'numpy': np.zeros([ *action.shape ])} # add an unused dummy action if the game is done
         argmax_action_list.append(argmax_action['numpy'])
     q_argmax_action_list.put(argmax_action_list)
 
@@ -306,7 +306,7 @@ class Model(nn.Module):
             _state_next_tuple = state_next_tuple[m * idx: m * (idx + 1)]
             proc = mp.Process(
                 target=_get_argmax_action, 
-                args=(model, _done_tuple, _state_next_tuple, q_argmax_action_list[idx])
+                args=(model, _done_tuple, _state_next_tuple, action_tuple[0], q_argmax_action_list[idx])
                 )
             proc.start()
             procs.append(proc)
