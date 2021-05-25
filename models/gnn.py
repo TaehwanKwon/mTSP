@@ -128,7 +128,7 @@ class Model(nn.Module):
         edge = state['edge'] # (n_batch, n_cities, n_nodes, 3)
 
         avail_node_presence = state['avail_node_presence'] # (n_batch, 1, n_nodes)
-        avail_node_action = state['avail_node_action'] # (n_batch, 1, n_nodes)
+        #avail_node_action = state['avail_node_action'] # (n_batch, 1, n_nodes)
         avail_robot = state['avail_robot'] # (n_batch, 1, n_robots)
 
         no_robot = torch.sum(avail_robot, dim=-1).squeeze(-1)==0
@@ -199,7 +199,7 @@ class Model(nn.Module):
 
     def get_Q_from_list_action(self, state, action):
         state_tensor = {
-            key: torch.from_numpy(state[key]).float().to(self.device) for key in state
+            key: torch.from_numpy(state[key]).float().to(self.device) for key in state if not key=='avail_node_action'
         }
         
         action_numpy = self._convert_list_action_to_numpy(action)
@@ -214,7 +214,7 @@ class Model(nn.Module):
 
     def get_Q_from_numpy_action(self, state, action):
         state_tensor = {
-            key: torch.from_numpy(state[key]).float().to(self.device) for key in state
+            key: torch.from_numpy(state[key]).float().to(self.device) for key in state if not key=='avail_node_action'
         }
         action_tensor = torch.from_numpy(action).float().to(self.device)
         with torch.no_grad():
@@ -237,11 +237,13 @@ class Model(nn.Module):
             + f"your trying to use it for batch size {state['avail_robot'].shape[0]}"
             )
         check_multiple_available_robots = np.sum(state['avail_robot']) > 1
-        check_multiple_available_nodes = np.sum(state['avail_node_action'][0, 0, :-1]) > 0
+        check_multiple_available_nodes = np.sum(state['avail_node_action'][0, :, :-1]) > 0
 
         idx_avail_robots = self._get_idx_avail_robots_from_state(state)
-        idx_avail_nodes = self._get_idx_avail_nodes_from_state(state)
-        
+        idx_avail_nodes_list = self._get_idx_avail_nodes_list_from_state(state)
+
+        # print(f"idx_avail_nodes_list: {idx_avail_nodes_list}")
+        # print(f"avail_node_action: {state['avail_node_action']}")
         if ( # multiple robots & multiple nodes
             check_multiple_available_robots
             and check_multiple_available_nodes
@@ -255,6 +257,8 @@ class Model(nn.Module):
                 action_list[idx_robot] = self.config['env']['num_cities'] # go_base
 
         action_numpy = self._convert_list_action_to_numpy(action_list)
+
+        # print(f":action_list: {action_list}")
 
         return {
             'list': action_list,
@@ -270,16 +274,26 @@ class Model(nn.Module):
             + f"your trying to use it for batch size {state['avail_robot'].shape[0]}"
             )
         check_multiple_available_robots = np.sum(state['avail_robot']) > 1
-        check_multiple_available_nodes = np.sum(state['avail_node_action'][0,0, :-1]) > 0
+        check_multiple_available_nodes = np.sum(state['avail_node_action'][0, :, :-1]) > 0
 
         idx_avail_robots = self._get_idx_avail_robots_from_state(state)
-        idx_avail_nodes = self._get_idx_avail_nodes_from_state(state)
+        idx_avail_nodes_list = self._get_idx_avail_nodes_list_from_state(state)
 
+        chosen_nodes = []
         action_list = [None for _ in range(self.config['env']['num_robots'])]
         for idx_robot in idx_avail_robots:
+            idx_avail_nodes = idx_avail_nodes_list[idx_robot]
+
+            # remove already chosen nodes
+            for chosen_node in chosen_nodes:
+                if not chosen_node == self.config['env']['num_cities'] and chosen_node in idx_avail_nodes:
+                    idx_avail_nodes.remove(chosen_node)
+
             idx_node = random.sample(idx_avail_nodes, 1)[0]
-            action_list[idx_robot] = idx_node
+            action_list[idx_robot] = int(idx_node)
             self._remove_node(idx_avail_nodes, idx_node)
+
+            chosen_nodes.append(idx_node)
 
         action_numpy = self._convert_list_action_to_numpy(action_list)
 
@@ -386,11 +400,6 @@ class Model(nn.Module):
                     1,
                     self.config['env']['num_cities'] + 1
                     ),
-                'avail_node_action': (
-                    self.config['learning']['size_batch'], 
-                    1,
-                    self.config['env']['num_cities'] + 1
-                    ),
                 'avail_robot': (
                     self.config['learning']['size_batch'], 
                     1,
@@ -431,45 +440,50 @@ class Model(nn.Module):
         auction_result = [ None for _ in range(self.config['env']['num_robots']) ]
 
         idx_avail_robots = self._get_idx_avail_robots_from_state(state)
-        idx_avail_nodes = self._get_idx_avail_nodes_from_state(state)
+        idx_avail_nodes_list = self._get_idx_avail_nodes_list_from_state(state)
+        max_len_avail_nodes = [len(idx_avail_nodes) for idx_avail_nodes in idx_avail_nodes_list]
 
         final_auction_action = np.zeros([1, self.config['env']['num_robots'], self.config['env']['num_cities'] + 1])
         updated_avail_node_action = state['avail_node_action']
 
+        chosen_nodes = []
         n_for_auction = len(idx_avail_robots)
         for _ in range(n_for_auction):
-            # Duplicate state for computing Qs for every possible nodes for a robot
-            _state = {
-                key: np.tile(state[key], [len(idx_avail_nodes), 1, 1]) if len(state[key].shape)==3
-                else np.tile(state[key], [len(idx_avail_nodes), 1, 1, 1])
-                for key in state
-                }
-
-            # Make actions for computing Qs for every possible nodes for a robot
-            action_numpys = [ 
-                np.zeros([
-                    len(idx_avail_nodes), 
-                    self.config['env']['num_robots'], 
-                    self.config['env']['num_cities'] + 1
-                    ]) + final_auction_action
-                for _ in range(len(idx_avail_robots))
-                ]
 
             idx_optimal_avail_nodes = []
             optimal_Qs = []
 
-            # Set hypothetical actions for each robots and nodes
-            for j, idx_robot in enumerate(idx_avail_robots):
-                for k, idx_node in enumerate(idx_avail_nodes):
-                    action_numpys[j][k, idx_robot, idx_node] = 1
-
             count = 0
-            for action_numpy in action_numpys:
+            for i, idx_robot in enumerate(idx_avail_robots):
+                idx_avail_nodes = idx_avail_nodes_list[idx_robot]
+                # remove already chosen nodes
+                for chosen_node in chosen_nodes:
+                    if not chosen_node == self.config['env']['num_cities'] and chosen_node in idx_avail_nodes:
+                        idx_avail_nodes.remove(chosen_node)
+
+                # Duplicate state for computing Qs for every possible nodes for a robot
+                _state = {
+                        key: np.tile(state[key], [len(idx_avail_nodes), 1, 1]) if len(state[key].shape)==3
+                        else np.tile(state[key], [len(idx_avail_nodes), 1, 1, 1])
+                        for key in state
+                        }
+                
+                # Make actions for computing Qs for every possible nodes for a robot
+                action_numpy = np.zeros([
+                                    len(idx_avail_nodes), 
+                                    self.config['env']['num_robots'], 
+                                    self.config['env']['num_cities'] + 1
+                                    ]) + final_auction_action
+
+                # Set hypothetical actions for each robots and nodes
+                for j, idx_node in enumerate(idx_avail_nodes):
+                    action_numpy[j, idx_robot, idx_node] = 1
+
                 Q_avail_nodes_of_a_robot = self.get_Q_from_numpy_action(_state, action_numpy).reshape(-1)
                 idx_optimal_avail_node = Q_avail_nodes_of_a_robot.argmax()
                 optimal_Q = Q_avail_nodes_of_a_robot[idx_optimal_avail_node]
 
-                idx_optimal_avail_nodes.append(idx_optimal_avail_node)
+                idx_optimal_avail_nodes.append(idx_avail_nodes[idx_optimal_avail_node])
                 optimal_Qs.append(optimal_Q)
 
                 #logger.debug(f"Q_avail_nodes_of_a_robot {idx_avail_robots[count]}: {Q_avail_nodes_of_a_robot}")
@@ -479,7 +493,8 @@ class Model(nn.Module):
 
             idx_optimal_avail_robot = np.array(optimal_Qs).argmax()
             argmax_robot = idx_avail_robots[idx_optimal_avail_robot]
-            argmax_node = idx_avail_nodes[idx_optimal_avail_nodes[idx_optimal_avail_robot]]
+            argmax_node = idx_optimal_avail_nodes[idx_optimal_avail_robot]
+            chosen_nodes.append(argmax_node)
 
             #logger.debug(f"argmax_robot, argmax_node: {argmax_robot, argmax_node}")
             #logger.debug(f"idx_avail_nodes: {idx_avail_nodes}")
@@ -499,10 +514,11 @@ class Model(nn.Module):
         action_list = [None for _ in range(self.config['env']['num_robots'])]
 
         idx_avail_robots = self._get_idx_avail_robots_from_state(state)
-        idx_avail_nodes = self._get_idx_avail_nodes_from_state(state)
+        idx_avail_nodes_list = self._get_idx_avail_nodes_list_from_state(state)
 
         assert len(idx_avail_robots)==1, "argmax action can not be computed when there is multiple available robots"
         idx_robot = idx_avail_robots[0]
+        idx_avail_nodes = idx_avail_nodes_list[idx_robot]
 
         _state = {
             key: np.tile(state[key], [len(idx_avail_nodes), 1, 1]) if len(state[key].shape)==3
@@ -526,7 +542,7 @@ class Model(nn.Module):
         #logger.debug(f"Q_avail_nodes: {Q_avail_nodes_of_a_robot}")
         #logger.debug(f"idx_avail_nodes: {idx_avail_nodes}")
 
-        action_list[idx_robot] = argmax_node
+        action_list[idx_robot] = int(argmax_node)
 
         return action_list
 
@@ -542,13 +558,20 @@ class Model(nn.Module):
 
         return idx_avail_robots
 
-    def _get_idx_avail_nodes_from_state(self, state):
-        avail_node_action = state['avail_node_action'][0, 0, :] #(n_cities + 1)
-        idx_avail_nodes = np.arange(self.config['env']['num_cities'] + 1)
-        mask_avail_nodes = avail_node_action > 0
-        idx_avail_nodes = idx_avail_nodes[mask_avail_nodes].tolist()
+    def _get_idx_avail_nodes_list_from_state(self, state):
+        idx_avail_nodes_list = []
+        avail_node_action = state['avail_node_action'][0, :, :] #(n_robots, n_cities + 1)
+        idx_avail_nodes = np.arange(self.config['env']['num_cities'] + 1).reshape(1, -1)
 
-        return idx_avail_nodes
+        masked_idx_nodes = avail_node_action * idx_avail_nodes
+        mask_avail_nodes = avail_node_action > 0
+
+        for i in range(self.config['env']['num_robots']):
+            idx_avail_nodes_list.append(
+                np.int32(masked_idx_nodes[i][mask_avail_nodes[i]]).tolist()
+                )        
+
+        return idx_avail_nodes_list
 
     def _convert_list_action_to_numpy(self, action_list):
         # convert action list into a tensor
@@ -557,7 +580,8 @@ class Model(nn.Module):
             if _action is None:
                 continue
             else:
-                action_numpy[0, idx, _action] = 1
+                assert int(_action) == _action, "int(_action) and _action should be same."
+                action_numpy[0, idx, int(_action)] = 1
 
         return action_numpy
 

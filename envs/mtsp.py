@@ -270,6 +270,7 @@ class MTSP(Env):
         return dt_sum, done
 
     def get_numpy_state(self):
+        n_close = 10
         state = dict()
 
         state['x_a'] = np.zeros([1, len(self.robots), len(self.cities) + 1])
@@ -280,7 +281,7 @@ class MTSP(Env):
         # (n_batch, n_cities, n_nodes, 3), distance to node, distance to base, is_targeting_base
         state['avail_node_presence'] = np.zeros([1, 1, len(self.cities) + 1])
         # (n_batch, 1, n_nodes) presence availability of each node, it is 0 once it is visited for city
-        state['avail_node_action'] = np.zeros([1, 1, len(self.cities) + 1])
+        state['avail_node_action'] = np.zeros([1, len(self.robots), len(self.cities) + 1])
         # (n_batch, 1, n_nodes) action availability of each node
         state['avail_robot'] = np.zeros([1, 1, len(self.robots)])
         # (n_batch, 1, n_robots) availability of robot
@@ -293,6 +294,7 @@ class MTSP(Env):
         for idx_robot, robot in enumerate(self.robots):
             for idx_city, city in enumerate(self.cities):
                 state['x_a'][0, idx_robot, idx_city] = self.config['scale_distance'] * robot.distance(city)
+                state['avail_node_action'][0, idx_robot, idx_city] = float(city.is_available())
             state['x_a'][0, idx_robot, -1] = self.config['scale_distance'] * robot.distance(self.base)
             
             if not robot.assigned_city is None:
@@ -307,19 +309,28 @@ class MTSP(Env):
 
             state['avail_robot'][0, 0, idx_robot] = float(not (robot.is_assigned or robot.is_returned_to_base))
 
-        n_remained_cities = np.sum(state['avail_node_action'])
+        dist_sorted = np.sort(
+            state['avail_node_action'][0, :, :-1] * state['x_a'][0, :, :-1]
+            + (1 - state['avail_node_action'][0, :, :-1]) * np.max(state['x_a'][0, :, :-1] + 10)
+            , axis=1
+            )
+        
+        dist_threshold_closest = dist_sorted[:, n_close].reshape(-1, 1)
+        is_in_threshold = state['x_a'][0, :, :-1] < dist_threshold_closest
+        state['avail_node_action'][0, :, :-1] = is_in_threshold * state['avail_node_action'][0, :, :-1]
+
+        no_remaining_cities = np.sum(state['avail_node_action']) == 0
         is_all_assignment_none_or_base = np.array(is_all_assignment_none_or_base).all()
         if (
-            n_remained_cities == 0
+            no_remaining_cities
             or not is_all_assignment_none_or_base
             ):
-            state['avail_node_action'][0, 0, -1] = 1
+            state['avail_node_action'][0, :, -1] = 1
             
         state['avail_node_presence'][0, 0, -1] = 1
         for idx_city, city in enumerate(self.cities):
             state['x_b'][0, idx_city, 0] = self.config['scale_distance'] * city.distance(self.base)
             state['avail_node_presence'][0, 0, idx_city] = float(not city.is_visited)
-            state['avail_node_action'][0, 0, idx_city] = float(city.is_available())
 
             for _idx_city, _city in enumerate(self.cities):
                 state['edge'][0, idx_city, _idx_city, :] = np.array([
@@ -332,7 +343,6 @@ class MTSP(Env):
                 self.config['scale_distance'] * city.distance(self.base), 
                 1
                 ])
-
         
 
         return state
