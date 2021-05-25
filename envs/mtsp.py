@@ -120,6 +120,7 @@ class MTSP(Env):
             xys = list()
             f = open(f"data/{file}", 'r')
             nxys = f.read().split('\n') # 'n x y'
+            f.close()
             for nxy in nxys:
                 n, x, y = nxy.split(' ')
                 xys.append( (float(x), float(y)) )
@@ -270,7 +271,8 @@ class MTSP(Env):
         return dt_sum, done
 
     def get_numpy_state(self):
-        n_close = 10
+        n_close = self.config['num_cities'] - 1
+        #n_close = 10
         state = dict()
 
         state['x_a'] = np.zeros([1, len(self.robots), len(self.cities) + 1])
@@ -315,14 +317,14 @@ class MTSP(Env):
             , axis=1
             )
         
+        n_remaining_cities = np.sum(state['avail_node_action'][0, 0, :-1])
         dist_threshold_closest = dist_sorted[:, n_close].reshape(-1, 1)
         is_in_threshold = state['x_a'][0, :, :-1] < dist_threshold_closest
         state['avail_node_action'][0, :, :-1] = is_in_threshold * state['avail_node_action'][0, :, :-1]
 
-        no_remaining_cities = np.sum(state['avail_node_action']) == 0
         is_all_assignment_none_or_base = np.array(is_all_assignment_none_or_base).all()
         if (
-            no_remaining_cities
+            n_remaining_cities == 0
             or not is_all_assignment_none_or_base
             ):
             state['avail_node_action'][0, :, -1] = 1
