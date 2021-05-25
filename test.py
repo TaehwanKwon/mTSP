@@ -71,7 +71,7 @@ def train(args, config, model, agent, simulator):
     _time_10_step = time.time()
     simulator.save_to_replay_buffer(config['learning']['size_replay_buffer'])
     logger.info("###### Start training #####")
-    for step_train in range(config['learning']['step'] + 1):
+    for step_train in range(step_prev, config['learning']['step'] + 1):
         _time_train = time.time()
         
         model.step_train = step_train
@@ -131,6 +131,8 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser(description='train_mtsp')
     parser.add_argument('--path_prev', type=str, 
                         help='path to previous model')
+    parser.add_argument('--step_prev', type=int, default=0,
+                        help='previous train step')
     parser.add_argument('--conf', type=str, 
                         help='conf to be used for training')
     args = parser.parse_args()
