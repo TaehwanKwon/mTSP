@@ -61,6 +61,9 @@ def train(args, config, model, agent, simulator):
         f = open(f"{path_log}/comment.txt", 'w')
         f.write(path_prev)
         f.close()
+
+    step_prev = args.step_prev
+    model.step_train = step_prev
     
     optimizer = Adam(model.parameters(), lr=config['learning']['lr'])
     logger_tool = LoggerTool(path_log)
