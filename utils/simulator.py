@@ -29,7 +29,7 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
     env = eval(f"{config['env']['name']}(config['env'])")
     s = env.reset()
 
-    num_collection = 50
+    num_collection = 100
 
     while True:
         if q_count.qsize() > 0:
