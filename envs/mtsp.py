@@ -307,6 +307,15 @@ class MTSP(Env):
 
             state['avail_robot'][0, 0, idx_robot] = float(not (robot.is_assigned or robot.is_returned_to_base))
 
+        n_remained_cities = np.sum(state['avail_node_action'])
+        is_all_assignment_none_or_base = np.array(is_all_assignment_none_or_base).all()
+        if (
+            n_remained_cities == 0
+            or not is_all_assignment_none_or_base
+            ):
+            state['avail_node_action'][0, 0, -1] = 1
+            
+        state['avail_node_presence'][0, 0, -1] = 1
         for idx_city, city in enumerate(self.cities):
             state['x_b'][0, idx_city, 0] = self.config['scale_distance'] * city.distance(self.base)
             state['avail_node_presence'][0, 0, idx_city] = float(not city.is_visited)
@@ -324,14 +333,7 @@ class MTSP(Env):
                 1
                 ])
 
-        n_remained_cities = np.sum(state['avail_node_action'])
-        is_all_assignment_none_or_base = np.array(is_all_assignment_none_or_base).all()
-        if (
-            n_remained_cities == 0
-            or not is_all_assignment_none_or_base
-            ):
-            state['avail_node_action'][0, 0, -1] = 1
-        state['avail_node_presence'][0, 0, -1] = 1
+        
 
         return state
                 
