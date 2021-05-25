@@ -129,9 +129,9 @@ class Model(nn.Module):
 
         avail_node_presence = state['avail_node_presence'] # (n_batch, 1, n_nodes)
         #avail_node_action = state['avail_node_action'] # (n_batch, 1, n_nodes)
-        avail_robot = state['avail_robot'] # (n_batch, 1, n_robots)
-
-        no_robot = torch.sum(avail_robot, dim=-1).squeeze(-1)==0
+        
+        #avail_robot = state['avail_robot'] # (n_batch, 1, n_robots)
+        #no_robot = torch.sum(avail_robot, dim=-1).squeeze(-1)==0
         #if no_robot.any(): logger.debug(f"There is no available robot in some batch, {no_robot}, may be the game is done")
 
         assigned_visited_city = (avail_node_presence - assignment) < 0
@@ -152,10 +152,14 @@ class Model(nn.Module):
         mask_presence = mask_presence * avail_node_presence 
         logit_presence = h2_presence * mask_presence - (1 - mask_presence) * 1e10
         presence_out = torch.softmax(logit_presence, dim = -1)
-        presence_in = presence_out.transpose(1, 2) # (n_batch, n_nodes, n_cities)
+        presence_in = presence_out.transpose(1, 2).unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
 
         edge_dist = edge[:, :, :, 0:1].transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
-        _presence_in = presence_in.unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
+        #_presence_in = presence_in.unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
+
+        # (n_batch, n_nodes, 1, base_hidden_size)
+        # (n_batch, n_nodes, n_cities)
+        # (n_batch, n_nodes, n_cities, base_hidden_size)
 
         # First convolution of graphs
         for t in range(self.T1):
@@ -165,31 +169,33 @@ class Model(nn.Module):
             # u_a_rep = torch.cat([u_a_rep, edge_dist], dim=-1) # (n_batch. n_nodes, n_cities, self.base_hidden_size + 1)
             
             embedding_dist_1a = torch.tanh(self.fc_embedding_1a(edge_dist)) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
-            u_a_rep = u_a.unsqueeze(1).repeat(1, n_nodes, 1, 1)[:, :, :-1, :] # (n_batch, n_nodes, n_cities, self.base_hidden_size)
-            u_a_rep = u_a_rep * embedding_dist_1a # (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_1a = u_a[:, :-1, :].unsqueeze(1) * embedding_dist_1a # (n_batch, n_nodes, n_cities, self.base_hidden_size)
 
-            l_a = torch.matmul(_presence_in, u_a_rep) # (n_batch, n_nodes, 1, self.base_hidden_size)
+            l_a = torch.matmul(presence_in, embedding_dist_1a) # (n_batch, n_nodes, 1, self.base_hidden_size)
             l_a = l_a.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size)
+            #l_a = torch.matmul(presence_in, u_a[:, :-1, :])
             u_a = torch.relu(self.fc_l_1a(l_a) + self.fc_x_1a(x_a) )
 
             embedding_dist_1b = torch.tanh(self.fc_embedding_1b(edge_dist)) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
-            u_b_rep = u_b.unsqueeze(1).repeat(1, n_nodes, 1, 1)[:, :, :-1, :] # (n_batch, n_nodes, n_cities, self.base_hidden_size)
-            u_b_rep = u_b_rep * embedding_dist_1b # (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_1b = u_b[:, :-1, :].unsqueeze(1) * embedding_dist_1b # (n_batch, n_nodes, n_cities, self.base_hidden_size)
 
-            l_b = torch.matmul(_presence_in, u_b_rep) # (n_batch, n_nodes, 1, self.base_hidden_size)
+            l_b = torch.matmul(presence_in, embedding_dist_1b) # (n_batch, n_nodes, 1, self.base_hidden_size)
             l_b = l_b.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size)
+            #l_b = torch.matmul(presence_in, u_b[:, :-1, :])
             u_b = torch.relu(self.fc_l_1b(l_b) + self.fc_x_1b(x_b) )
 
         u_concat = torch.cat([u_a, u_b], dim=-1) # (n_batch, n_nodes, 2 * self.base_hidden_size)
+        del u_a, l_a, u_b, l_b, x_a, x_b
         # Second convolution of graphs
         for t in range(self.T2):
-            embedding_dist_2 = torch.tanh(self.fc_embedding_2(edge_dist))
-            gamma_rep = gamma.unsqueeze(1).repeat(1, n_nodes, 1, 1)[:, :, :-1, :] # (n_batch, n_nodes, n_cities, 2 * self.base_hidden_size)
-            gamma_rep = gamma_rep * embedding_dist_2
+            embedding_dist_2 = torch.tanh(self.fc_embedding_2(edge_dist)) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_2 = gamma[:, :-1, :].unsqueeze(1) * embedding_dist_2 # (n_batch, n_nodes, n_cities, self.base_hidden_size)
 
-            l_2 = torch.matmul(_presence_in, gamma_rep) # (n_batch, n_nodes, 1, 2 * self.base_hidden_size)
-            l_2 = l_2.squeeze(-2) # (n_batch, n_nodes, 2 * self.base_hidden_size)
+            l_2 = torch.matmul(presence_in, embedding_dist_2) # (n_batch, n_nodes, 1, self.base_hidden_size)
+            l_2 = l_2.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size)
+            #l_2 = torch.matmul(presence_in, gamma[:, :-1, :])
             gamma = torch.relu(self.fc_l_2(l_2) + self.fc_x_2(u_concat)) # (n_batch, n_nodes, 2 * self.base_hidden_size)
+        del u_concat, l_2
 
         Q_utility = self.fc_Q(gamma) # (n_batch, n_nodes, 1)
         Q_utility = Q_utility * avail_node_presence.transpose(1,2) # Visited nodes are eliminated from graph
@@ -199,7 +205,7 @@ class Model(nn.Module):
 
     def get_Q_from_list_action(self, state, action):
         state_tensor = {
-            key: torch.from_numpy(state[key]).float().to(self.device) for key in state if not key=='avail_node_action'
+            key: torch.from_numpy(state[key]).float().to(self.device) for key in state if not (key=='avail_node_action' and key=='avail_robot')
         }
         
         action_numpy = self._convert_list_action_to_numpy(action)
@@ -214,7 +220,7 @@ class Model(nn.Module):
 
     def get_Q_from_numpy_action(self, state, action):
         state_tensor = {
-            key: torch.from_numpy(state[key]).float().to(self.device) for key in state if not key=='avail_node_action'
+            key: torch.from_numpy(state[key]).float().to(self.device) for key in state if not (key=='avail_node_action' and key=='avail_robot')
         }
         action_tensor = torch.from_numpy(action).float().to(self.device)
         with torch.no_grad():
@@ -400,11 +406,6 @@ class Model(nn.Module):
                     1,
                     self.config['env']['num_cities'] + 1
                     ),
-                'avail_robot': (
-                    self.config['learning']['size_batch'], 
-                    1,
-                    self.config['env']['num_robots']
-                    ),
                 },
             'action': (
                 self.config['learning']['size_batch'], 
@@ -534,8 +535,9 @@ class Model(nn.Module):
 
         for i, idx_node in enumerate(idx_avail_nodes):
             action_numpy[i, idx_robot, idx_node] = 1
-
+        _time_test = time.time()
         Q_avail_nodes_of_a_robot = self.get_Q_from_numpy_action(_state, action_numpy).reshape(-1)
+        #time_test = time.time() - _time_test; print(f"time_test_forward: {time_test}")
         idx_optimal_avail_node = Q_avail_nodes_of_a_robot.argmax()
         argmax_node = idx_avail_nodes[idx_optimal_avail_node]
 
