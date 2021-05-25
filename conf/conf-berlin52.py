@@ -25,13 +25,13 @@ config = {
         #'algorithm': 'sarsa',
         'lr': 1e-4,
         'eps': { # eps = eps_end + eps_add * half_life / (half_life + training_step)
-            'add': 0.45,
-            'end': 0.05,
+            'add': 0.9,
+            'end': 0.1,
             'half_life': 5000,
             },
         'gamma': 1.0,
-        'size_batch': 64,
+        'size_batch': 63,
         'size_replay_buffer': 20000,
-        'num_processes': 2,
+        'num_processes': 3,
     }
 }
