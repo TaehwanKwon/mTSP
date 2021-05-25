@@ -206,7 +206,8 @@ class Model(nn.Module):
         action_tensor = torch.from_numpy(action_numpy).float().to(self.device)
         with torch.no_grad():
             Q = self.forward(state_tensor, action_tensor)
-        
+        del state_tensor
+        del action_tensor
         Q = Q.detach().cpu().numpy()
 
         return Q
@@ -218,7 +219,8 @@ class Model(nn.Module):
         action_tensor = torch.from_numpy(action).float().to(self.device)
         with torch.no_grad():
             Q = self.forward(state_tensor, action_tensor)
-
+        del state_tensor
+        del action_tensor
         Q = Q.detach().cpu().numpy()
 
         return Q
@@ -299,8 +301,6 @@ class Model(nn.Module):
 
         assert len(state_next_tuple) % self.config['learning']['num_processes'] == 0, 'Currently we only support batch size proportional to number of total gpus'
         m = len(state_next_tuple) // self.config['learning']['num_processes']
-        q_argmax_action_list = [ mp.Queue() for _ in self.model_list ]
-        procs = []
         for idx_data in range(self.config['learning']['num_processes']):
             _done_tuple = done_tuple[m * idx_data: m * (idx_data + 1)]
             _state_next_tuple = state_next_tuple[m * idx_data: m * (idx_data + 1)]
