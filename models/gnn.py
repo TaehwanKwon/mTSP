@@ -91,6 +91,7 @@ class Model(nn.Module):
         self.replay_buffer = ReplayBuffer(config)
         self.device = device
         self.step_train = 0
+        self.tau_softmax = 0.5
 
         self.extra_gpus = extra_gpus
 
@@ -236,7 +237,7 @@ class Model(nn.Module):
         return Q
 
     # Action based on learned Q: auctino for multiple robots, argmax for a robot
-    def action(self, state):
+    def action(self, state, softmax=True):
         # Returns an optimal Q action
         assert state['avail_robot'].shape[0] == 1, (
             f"This function is not designed for batch operation, "
@@ -254,9 +255,9 @@ class Model(nn.Module):
             check_multiple_available_robots
             and check_multiple_available_nodes
             ):
-            action_list = self._auction(state)
+            action_list = self._auction(state, softmax=softmax)
         elif check_multiple_available_nodes: # multiple nodes, one robot
-            action_list = self._argmax_action(state)
+            action_list = self._argmax_action(state, softmax=softmax)
         else: # only one node (base), should go base
             action_list = [ None for _ in range(self.config['env']['num_robots']) ]
             for idx_robot in idx_avail_robots:
@@ -437,7 +438,7 @@ class Model(nn.Module):
     def add_to_replay_buffer(self, data):
         self.replay_buffer.append(data)
 
-    def _auction(self, state):
+    def _auction(self, state, softmax=False):
         auction_result = [ None for _ in range(self.config['env']['num_robots']) ]
 
         idx_avail_robots = self._get_idx_avail_robots_from_state(state)
@@ -491,8 +492,8 @@ class Model(nn.Module):
                 count += 1
 
             #logger.debug(f"optimal_Qs: {optimal_Qs}")
-
-            idx_optimal_avail_robot = np.array(optimal_Qs).argmax()
+            optimal_Qs = np.array(optimal_Qs)
+            idx_optimal_avail_robot = optimal_Qs.argmax()
             argmax_robot = idx_avail_robots[idx_optimal_avail_robot]
             argmax_node = idx_optimal_avail_nodes[idx_optimal_avail_robot]
             chosen_nodes.append(argmax_node)
@@ -511,7 +512,7 @@ class Model(nn.Module):
         return auction_result
 
     # Argmax action when there is only one available robot
-    def _argmax_action(self, state):
+    def _argmax_action(self, state, softmax=False):
         action_list = [None for _ in range(self.config['env']['num_robots'])]
 
         idx_avail_robots = self._get_idx_avail_robots_from_state(state)
@@ -538,7 +539,16 @@ class Model(nn.Module):
         _time_test = time.time()
         Q_avail_nodes_of_a_robot = self.get_Q_from_numpy_action(_state, action_numpy).reshape(-1)
         #time_test = time.time() - _time_test; print(f"time_test_forward: {time_test}")
-        idx_optimal_avail_node = Q_avail_nodes_of_a_robot.argmax()
+        # Q_avg = np.mean(Q_avail_nodes_of_a_robot)
+        # std = np.sum( (Q_avail_nodes_of_a_robot - Q_avg) ** 2) ** 0.5 + 1e-3
+        # self.p = (
+        #     np.exp( (Q_avail_nodes_of_a_robot - Q_avg) / std)
+        #     / np.sum( np.exp( (Q_avail_nodes_of_a_robot - Q_avg) / std) )
+        #     )
+        if softmax:
+            idx_optimal_avail_node = np.random.choice(len(idx_avail_nodes), 1, p=self.p)[0]
+        else:
+            idx_optimal_avail_node = Q_avail_nodes_of_a_robot.argmax()
         argmax_node = idx_avail_nodes[idx_optimal_avail_node]
 
         #logger.debug(f"Q_avail_nodes: {Q_avail_nodes_of_a_robot}")
