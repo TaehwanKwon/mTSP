@@ -55,12 +55,14 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
                 model.load_state_dict(state_dict_gpu)
             else:
                 q_flag_models.put(flag_models)
-
             for _ in range(_num_collection):
+                _time_test = time.time()
                 if np.random.rand() < eps:
-                    action = model.random_action(s)
+                    action = model.action(s, softmax=False)
                 else:
-                    action = model.action(s)
+                    action = model.action(s, softmax=False)
+                time_test = time.time() - _time_test
+                #print(f"time_test: {time_test}")
                 s_next, reward, done = env.step(action['list'])
                 sards = (s, action['numpy'], reward, done, s_next)
                 q_data.put(sards)
@@ -75,8 +77,6 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
             _done_tuple, _state_next_tuple, _action = data_argmax
             argmax_action_list = _get_argmax_action(model, _done_tuple, _state_next_tuple, _action)
             q_data.put( (idx_data, argmax_action_list) )
-
-
         time.sleep(1e-3)
 
 def get_data2(idx, config, q_data, q_count, q_eps, q_flag_models, q_model):
@@ -106,10 +106,11 @@ def get_data2(idx, config, q_data, q_count, q_eps, q_flag_models, q_model):
                 action = None
             else:
                 if np.random.rand() < eps:
-                    action = model.random_action(s)
+                    #action = model.random_action(s)
+                    action = model.action(s, softmax=True)
                 else:
                     _time_test = time.time()
-                    action = model.action(s)
+                    action = model.action(s, softmax=False)
                     time_test = time.time() - _time_test
                     #print(f"time_test: {time_test}")
                 s_next, reward, done = env.step(action['list'])
@@ -192,6 +193,7 @@ class Simulator:
                 num_data = num_data - 1
             else:
                 time.sleep(1e-3)
+        self.q_eps.get()
 
     def terminate(self):
         for proc in self.procs:
