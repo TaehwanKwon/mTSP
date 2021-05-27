@@ -32,7 +32,8 @@ def test(config, model, step_train=0, path_log=None):
     done = False
     score = 0
     while not done:
-        action = model.action(s)
+        action = model.action(s, softmax=False)
+        if score !=0: print(f"p_max: {model.p.max():.3f}, p_min: {model.p.min():.3f}")
         s_next, reward, done = env.step(action['list'])
         s = s_next
         score += reward
