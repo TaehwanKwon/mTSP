@@ -271,8 +271,8 @@ class MTSP(Env):
         return dt_sum, done
 
     def get_numpy_state(self):
-        n_close = self.config['num_cities'] - 1
-        #n_close = 10
+        #n_close = self.config['num_cities'] - 1
+        n_close = 26
         state = dict()
 
         state['x_a'] = np.zeros([1, len(self.robots), len(self.cities) + 1])
