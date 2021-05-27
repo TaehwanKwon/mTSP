@@ -539,12 +539,12 @@ class Model(nn.Module):
         _time_test = time.time()
         Q_avail_nodes_of_a_robot = self.get_Q_from_numpy_action(_state, action_numpy).reshape(-1)
         #time_test = time.time() - _time_test; print(f"time_test_forward: {time_test}")
-        # Q_avg = np.mean(Q_avail_nodes_of_a_robot)
-        # std = np.sum( (Q_avail_nodes_of_a_robot - Q_avg) ** 2) ** 0.5 + 1e-3
-        # self.p = (
-        #     np.exp( (Q_avail_nodes_of_a_robot - Q_avg) / std)
-        #     / np.sum( np.exp( (Q_avail_nodes_of_a_robot - Q_avg) / std) )
-        #     )
+        Q_avg = np.mean(Q_avail_nodes_of_a_robot)
+        std = np.sum( (Q_avail_nodes_of_a_robot - Q_avg) ** 2) ** 0.5 + 1e-3
+        self.p = (
+            np.exp( (Q_avail_nodes_of_a_robot - Q_avg) / std)
+            / np.sum( np.exp( (Q_avail_nodes_of_a_robot - Q_avg) / std) )
+            )
         if softmax:
             idx_optimal_avail_node = np.random.choice(len(idx_avail_nodes), 1, p=self.p)[0]
         else:
