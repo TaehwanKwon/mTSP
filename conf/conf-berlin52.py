@@ -20,18 +20,18 @@ config = {
         'scale_reward':2.5e-4,
     },
     'learning':{
-        'step': 100000,
+        'step': 200000,
         'algorithm': 'optimal_q_learning',
         #'algorithm': 'sarsa',
         'lr': 1e-4,
         'eps': { # eps = eps_end + eps_add * half_life / (half_life + training_step)
             'add': 0.9,
             'end': 0.1,
-            'half_life': 5000,
+            'half_life': 10000,
             },
         'gamma': 1.0,
-        'size_batch': 63,
-        'size_replay_buffer': 20000,
-        'num_processes': 3,
+        'size_batch': 64,
+        'size_replay_buffer': 10000,
+        'num_processes': 2,
     }
 }
