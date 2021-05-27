@@ -58,7 +58,7 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
             for _ in range(_num_collection):
                 _time_test = time.time()
                 if np.random.rand() < eps:
-                    action = model.action(s, softmax=False)
+                    action = model.action(s, softmax=True)
                 else:
                     action = model.action(s, softmax=False)
                 time_test = time.time() - _time_test
