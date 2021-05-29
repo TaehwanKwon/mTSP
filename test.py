@@ -150,6 +150,7 @@ if __name__=='__main__':
     
     try:
         train(args, config, model, agent, simulator)
+        simulator.terminate()
     except KeyboardInterrupt:
         # terminate processes generated for collecting data
         simulator.terminate()
