@@ -27,11 +27,12 @@ config = {
         'eps': { # eps = eps_end + eps_add * half_life / (half_life + training_step)
             'add': 0.9,
             'end': 0.1,
-            'half_life': 10000,
+            'half_life': 20000,
             },
         'gamma': 1.0,
         'size_batch': 64,
-        'size_replay_buffer': 10000,
+        'size_replay_buffer': 5000,
+        'num_rollout':5,
         'num_processes': 2,
     }
 }
