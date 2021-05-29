@@ -26,11 +26,15 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
     device = idx % torch.cuda.device_count()
     model = Model(config, device).to(device)
 
+    num_collection = 100
+    rollout = {
+        'state': list(),
+        'action': list(),
+        'reward': list(),
+    }
+
     env = eval(f"{config['env']['name']}(config['env'])")
     s = env.reset()
-
-    num_collection = 100
-
     while True:
         if q_count.qsize() > 0:
             count = q_count.get()
@@ -55,6 +59,7 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
                 model.load_state_dict(state_dict_gpu)
             else:
                 q_flag_models.put(flag_models)
+            
             for _ in range(_num_collection):
                 _time_test = time.time()
                 if np.random.rand() < eps:
@@ -65,8 +70,26 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
                 time_test = time.time() - _time_test
                 #print(f"time_test: {time_test}")
                 s_next, reward, done = env.step(action['list'])
-                sards = (s, action['numpy'], reward, done, s_next)
-                q_data.put(sards)
+                
+                rollout['state'].append(s)
+                rollout['action'].append(action['numpy'])
+                rollout['reward'].append(reward)
+                
+                if not done and len(rollout['state'])==config['learning']['num_rollout']:
+                    sards = (rollout['state'][0], rollout['action'][0], sum(rollout['reward']), done, s_next)
+                    q_data.put(sards)
+                    rollout['state'].pop(0)
+                    rollout['action'].pop(0)
+                    rollout['reward'].pop(0)
+                elif done:
+                    for i in range(config['learning']['num_rollout']):
+                        sards = (rollout['state'][0], rollout['action'][0], sum(rollout['reward']), done, s_next)
+                        q_data.put(sards)
+                        rollout['state'].pop(0)
+                        rollout['action'].pop(0)
+                        rollout['reward'].pop(0)
+
+                    assert len(rollout['state'])==0, f"the length of left state should be zero, currently {len(rollout['state'])}"
 
                 if done:
                     s = env.reset()
