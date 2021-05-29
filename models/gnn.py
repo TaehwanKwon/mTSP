@@ -74,17 +74,13 @@ class Model(nn.Module):
         self.fc1_presence = nn.Linear(3, self.base_hidden_size, bias=self.bias)
         self.fc2_presence = nn.Linear(self.base_hidden_size, 1, bias=self.bias)
 
-        self.fc_x_1a = nn.Linear(1, self.base_hidden_size, bias=self.bias)
-        self.fc_embedding_1a = nn.Linear(1, self.base_hidden_size, bias=self.bias)
-        self.fc_l_1a = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
+        self.fc_x_1 = nn.Linear(3, self.base_hidden_size, bias=self.bias)
+        self.fc_embedding_1 = nn.Linear(1, self.base_hidden_size, bias=self.bias)
+        self.fc_l_1 = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
 
-        self.fc_x_1b = nn.Linear(1, self.base_hidden_size, bias=self.bias)
-        self.fc_embedding_1b = nn.Linear(1, self.base_hidden_size, bias=self.bias)
-        self.fc_l_1b = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
-
-        self.fc_x_2 = nn.Linear(2 * self.base_hidden_size, 2 * self.base_hidden_size, bias=self.bias)
-        self.fc_embedding_2 = nn.Linear(1, 2 * self.base_hidden_size, bias=self.bias)
-        self.fc_l_2 = nn.Linear(2 * self.base_hidden_size, 2 * self.base_hidden_size, bias=self.bias)
+        self.fc_x_2 = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
+        self.fc_embedding_2 = nn.Linear(1, self.base_hidden_size, bias=self.bias)
+        self.fc_l_2 = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
 
         self.fc_Q = nn.Linear(2 * self.base_hidden_size, 1)
 
@@ -142,8 +138,8 @@ class Model(nn.Module):
         n_cities = edge.shape[1]
         n_nodes = edge.shape[2]
 
-        u_a = self.sigma * torch.randn(n_batch, n_nodes, self.base_hidden_size).to(self.device)
-        u_b = self.sigma * torch.randn(n_batch, n_nodes, self.base_hidden_size).to(self.device)
+        x = torch.cat([x_a, x_b, avail_node_presence.transpose(-2,-1)], dim=-1) # (n_batch, n_nodes, 3)
+        u = self.sigma * torch.randn(n_batch, n_nodes, self.base_hidden_size).to(self.device)
         gamma = self.sigma * torch.randn(n_batch, n_nodes, 2 * self.base_hidden_size).to(self.device)
 
         h1_presence = torch.relu(self.fc1_presence(edge))
@@ -152,15 +148,11 @@ class Model(nn.Module):
         mask_presence = 1 - torch.eye(n_cities, n_nodes).unsqueeze(0).repeat(n_batch, 1, 1).to(self.device) # eleminate self-feeding presence
         mask_presence = mask_presence * avail_node_presence 
         logit_presence = h2_presence * mask_presence - (1 - mask_presence) * 1e10
-        presence_out = torch.softmax(logit_presence, dim = -1)
+        presence_out = torch.softmax(logit_presence, dim = -1)  # (n_batch, n_cities, n_nodes)
         presence_in = presence_out.transpose(1, 2).unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
 
         edge_dist = edge[:, :, :, 0:1].transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
         #_presence_in = presence_in.unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
-
-        # (n_batch, n_nodes, 1, base_hidden_size)
-        # (n_batch, n_nodes, n_cities)
-        # (n_batch, n_nodes, n_cities, base_hidden_size)
 
         # First convolution of graphs
         for t in range(self.T1):
@@ -169,24 +161,15 @@ class Model(nn.Module):
             # u_a_rep = u_a.unsqueeze(1).repeat(1, n_nodes, 1, 1)[:, :, :-1, :] # (n_batch. n_nodes, n_cities, self.base_hidden_size)
             # u_a_rep = torch.cat([u_a_rep, edge_dist], dim=-1) # (n_batch. n_nodes, n_cities, self.base_hidden_size + 1)
             
-            embedding_dist_1a = torch.tanh(self.fc_embedding_1a(edge_dist)) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
-            embedding_dist_1a = u_a[:, :-1, :].unsqueeze(1) * embedding_dist_1a # (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_1 = torch.tanh(self.fc_embedding_1a(edge_dist)) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_1 = u_a[:, :-1, :].unsqueeze(1) * embedding_dist_1 # (n_batch, 1 -> n_nodes, n_cities, self.base_hidden_size)
 
-            l_a = torch.matmul(presence_in, embedding_dist_1a) # (n_batch, n_nodes, 1, self.base_hidden_size)
-            l_a = l_a.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size)
+            l_1 = torch.matmul(presence_in, embedding_dist_1) # (n_batch, n_nodes, 1, self.base_hidden_size)
+            l_1 = l_a.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size)
             #l_a = torch.matmul(presence_in, u_a[:, :-1, :])
-            u_a = torch.relu(self.fc_l_1a(l_a) + self.fc_x_1a(x_a) )
+            u = torch.relu(self.fc_l_1a(l_1) + self.fc_x_1a(x) )
 
-            embedding_dist_1b = torch.tanh(self.fc_embedding_1b(edge_dist)) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
-            embedding_dist_1b = u_b[:, :-1, :].unsqueeze(1) * embedding_dist_1b # (n_batch, n_nodes, n_cities, self.base_hidden_size)
-
-            l_b = torch.matmul(presence_in, embedding_dist_1b) # (n_batch, n_nodes, 1, self.base_hidden_size)
-            l_b = l_b.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size)
-            #l_b = torch.matmul(presence_in, u_b[:, :-1, :])
-            u_b = torch.relu(self.fc_l_1b(l_b) + self.fc_x_1b(x_b) )
-
-        u_concat = torch.cat([u_a, u_b], dim=-1) # (n_batch, n_nodes, 2 * self.base_hidden_size)
-        del u_a, l_a, u_b, l_b, x_a, x_b
+        del u, l_1, x, x_a, x_b
         # Second convolution of graphs
         for t in range(self.T2):
             embedding_dist_2 = torch.tanh(self.fc_embedding_2(edge_dist)) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
@@ -195,12 +178,13 @@ class Model(nn.Module):
             l_2 = torch.matmul(presence_in, embedding_dist_2) # (n_batch, n_nodes, 1, self.base_hidden_size)
             l_2 = l_2.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size)
             #l_2 = torch.matmul(presence_in, gamma[:, :-1, :])
-            gamma = torch.relu(self.fc_l_2(l_2) + self.fc_x_2(u_concat)) # (n_batch, n_nodes, 2 * self.base_hidden_size)
-        del u_concat, l_2
+            gamma = torch.relu(self.fc_l_2(l_2) + self.fc_x_2(u)) # (n_batch, n_nodes, self.base_hidden_size)
+        del u, l_2
 
-        Q_utility = self.fc_Q(gamma) # (n_batch, n_nodes, 1)
-        Q_utility = Q_utility * avail_node_presence.transpose(1,2) # Visited nodes are eliminated from graph
-        Q = torch.sum(Q_utility, dim=1) # (n_batch, 1)
+        sum_gamma_remained = torch.sum(gamma * avail_node_presence.transpose(-2, -1), dim=-2) # (n_batch, self.base_hidden_size)
+        sum_gamma_done = torch.sum(gamma * (1 - avail_node_presence.transpose(-2, -1)), dim=-2) # (n_batch, self.base_hidden_size)
+        cat_gamma = torch.cat([sum_gamma_remained, sum_gamma_done], dim=-1) # (n_batch, 2 * self.base_hidden_size)
+        Q = self.fc_Q(cat_gamma).squeeze(-1) # (n_batch)
 
         return Q
 
