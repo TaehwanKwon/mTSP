@@ -62,6 +62,7 @@ def train(args, config, model, agent, simulator):
         f = open(f"{path_log}/comment.txt", 'w')
         f.write(path_prev)
         f.close()
+        os.system(f"rsync -av --progress . {path_log}/ --exclude logs")
 
     step_prev = args.step_prev
     model.step_train = step_prev
