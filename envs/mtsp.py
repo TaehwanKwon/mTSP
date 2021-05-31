@@ -327,9 +327,9 @@ class MTSP(Env):
                     city1 = robot.location_history[i]
                     city2 = robot.location_history[i + 1]
                     if not type(city2) == Base:
-                        state['presence_prev'][0, city1.idx, city2.idx] = 1
+                        state['presence_prev'][0, city1.id, city2.id] = 1
                     else:
-                        state['presence_prev'][0, city1.idx, -1] = 1
+                        state['presence_prev'][0, city1.id, -1] = 1
 
             for idx_city, city in enumerate(self.cities):
                 state['x_a'][0, idx_robot, idx_city, 0] = self.config['scale_distance'] * robot.distance(city)
