@@ -31,6 +31,7 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
         'state': list(),
         'action': list(),
         'reward': list(),
+        'sards':list(),
     }
 
     env = eval(f"{config['env']['name']}(config['env'])")
@@ -60,7 +61,9 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
             else:
                 q_flag_models.put(flag_models)
             
-            for _ in range(_num_collection):
+            num_data = 0
+            num_remaining_data = len(rollout['sards'])
+            while num_data < _num_collection - num_remaining_data:
                 _time_test = time.time()
                 if np.random.rand() < eps:
                     #action = model.action(s, softmax=True)
@@ -77,17 +80,19 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
                 
                 if not done and len(rollout['state'])==config['learning']['num_rollout']:
                     sards = (rollout['state'][0], rollout['action'][0], sum(rollout['reward']), done, s_next)
-                    q_data.put(sards)
                     rollout['state'].pop(0)
                     rollout['action'].pop(0)
                     rollout['reward'].pop(0)
+                    rollout['sards'].append(sards)
+                    num_data += 1
                 elif done:
                     for i in range(config['learning']['num_rollout']):
                         sards = (rollout['state'][0], rollout['action'][0], sum(rollout['reward']), done, s_next)
-                        q_data.put(sards)
                         rollout['state'].pop(0)
                         rollout['action'].pop(0)
                         rollout['reward'].pop(0)
+                        rollout['sards'].append(sards)
+                        num_data += 1
 
                     assert len(rollout['state'])==0, f"the length of left state should be zero, currently {len(rollout['state'])}"
 
@@ -95,6 +100,10 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
                     s = env.reset()
                 else:
                     s = s_next
+
+            for _ in range(_num_collection):
+                sards = rollout['sards'].pop(0)
+                q_data.put(sards)
         
         elif q_data_argmax.qsize() > 0:
             idx_data, data_argmax =  q_data_argmax.get()
@@ -207,10 +216,13 @@ class Simulator:
         self.q_model.put(state_dict_cpu)
         self.q_flag_models.put( [True for _ in range(self.config['learning']['num_processes'])] )
 
+        num_data_prev = 0
         while num_data > 0:
             if num_data % 100 == 0:
-                logger.debug(f"collecting data.. {num_data} are left")
-                #print(f"collecting data.. {num_data} are left")
+                if num_data != num_data_prev:
+                    logger.debug(f"collecting data.. {num_data} are left")
+                    print(f"collecting data.. {num_data} are left")
+                    num_data_prev = num_data
             if self.q_data.qsize() > 0 :
                 sards = self.q_data.get()
                 self.model.add_to_replay_buffer(sards)
