@@ -156,7 +156,8 @@ class Model(nn.Module):
             presence_out = avail_node_presence[:, :, :-1].transpose(-2, -1) * presence_out # masking presence out from visited nodes
         else:
             mask_drawed_presence_out = torch.sum(presence_prev, dim=-1) > 0
-            presence_out[mask_drawed_presence_out] = presence_prev[mask_drawed_presence_out]
+            mask_drawed_presence_out = mask_drawed_presence_out.float().unsqueeze(-1)
+            presence_out = mask_drawed_presence_out * presence_prev + (1 - mask_drawed_presence_out) * presence_out
         
         presence_in = presence_out.transpose(1, 2).unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
 
