@@ -294,6 +294,8 @@ class MTSP(Env):
         # (n_batch, 1, n_robots) availability of robot
         state['assignment_prev'] = np.zeros([1, len(self.robots), len(self.cities) + 1])
         # (n_batch, n_robots, n_nodes) previous assignments
+        state['presence_prev'] = np.zeros([1, len(self.cities), len(self.cities) + 1]) 
+        # (n_batch, n_cities, n_nodes), trajectories of graph
 
         state['avail_node_presence'][0, 0, -1] = 1
         state['coord'][0, -1, :] = np.array([self.base.x, self.base.y])
@@ -320,6 +322,15 @@ class MTSP(Env):
 
         is_all_assignment_none_or_base = []
         for idx_robot, robot in enumerate(self.robots):
+            if len(robot.location_history) > 1:
+                for i in range(len(robot.location_history) - 1):
+                    city1 = robot.location_history[i]
+                    city2 = robot.location_history[i + 1]
+                    if not type(city2) == Base:
+                        state['presence_prev'][0, city1.idx, city2.idx] = 1
+                    else:
+                        state['presence_prev'][0, city1.idx, -1] = 1
+
             for idx_city, city in enumerate(self.cities):
                 state['x_a'][0, idx_robot, idx_city, 0] = self.config['scale_distance'] * robot.distance(city)
                 state['x_a'][0, idx_robot, idx_city, 1:] = np.array([city.x - robot.x, city.y - robot.y]) / std_coord
