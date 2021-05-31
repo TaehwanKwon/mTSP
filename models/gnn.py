@@ -123,6 +123,7 @@ class Model(nn.Module):
         x_b = state['x_b'] # (n_batch, n_nodes, 1)
         coord = state['coord'] # (n_batch, n_nodes, 2)
         edge = state['edge'] # (n_batch, n_cities, n_nodes, 3)
+        presence_prev = state['presence_prev']
 
         avail_node_presence = state['avail_node_presence'] # (n_batch, 1, n_nodes)
         #avail_node_action = state['avail_node_action'] # (n_batch, 1, n_nodes)
@@ -149,6 +150,14 @@ class Model(nn.Module):
         mask_presence = mask_presence * avail_node_presence 
         logit_presence = h2_presence * mask_presence - (1 - mask_presence) * 1e10
         presence_out = torch.softmax(logit_presence, dim = -1)  # (n_batch, n_cities, n_nodes)
+        
+        # handling visited nodes
+        if not 'presence_prev' in self.config['learning'] or not self.config['learning']['presence_prev']:
+            presence_out = avail_node_presence[:, :, :-1].transpose(-2, -1) * presence_out # masking presence out from visited nodes
+        else:
+            mask_drawed_presence_out = torch.sum(presence_prev, dim=-1) > 0
+            presence_out[mask_drawed_presence_out] = presence_prev[mask_drawed_presence_out]
+        
         presence_in = presence_out.transpose(1, 2).unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
 
         edge_dist = edge[:, :, :, 0:1].transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
@@ -366,10 +375,15 @@ class Model(nn.Module):
         self.shapes = {
             'state':{
                 'assignment_prev': (
-                        self.config['learning']['size_batch'], 
-                        self.config['env']['num_robots'],
-                        self.config['env']['num_cities'] + 1
-                        ),
+                    self.config['learning']['size_batch'], 
+                    self.config['env']['num_robots'],
+                    self.config['env']['num_cities'] + 1
+                    ),
+                'presence_prev': (
+                    self.config['learning']['size_batch'], 
+                    self.config['env']['num_cities'], # no '+1' since there is no edge going out from the base
+                    self.config['env']['num_cities'] + 1
+                    ),
                 'x_a': (
                     self.config['learning']['size_batch'], 
                     self.config['env']['num_robots'],
