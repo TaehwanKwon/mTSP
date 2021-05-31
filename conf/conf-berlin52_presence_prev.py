@@ -21,7 +21,7 @@ config = {
     },
     'learning':{
         'step': 200000,
-        'presence_prev':False,
+        'presence_prev':True,
         'algorithm': 'optimal_q_learning',
         #'algorithm': 'sarsa',
         'lr_start': 5e-4,
