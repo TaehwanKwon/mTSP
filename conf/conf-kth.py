@@ -46,6 +46,6 @@ config = {
         'size_batch': 64,
         'size_replay_buffer': 20000,
         'num_rollout':1,
-        'num_processes': 4,
+        'num_processes': 2,
     }
 }

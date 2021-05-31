@@ -33,9 +33,9 @@ config = {
             'half_life': 5000,
             },
         'gamma': 1.0,
-        'size_batch': 63,
+        'size_batch': 64,
         'size_replay_buffer': 10000,
         'num_rollout':1,
-        'num_processes': 3,
+        'num_processes': 2,
     }
 }
