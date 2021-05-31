@@ -271,13 +271,16 @@ class MTSP(Env):
         return dt_sum, done
 
     def get_numpy_state(self):
-        #n_close = self.config['num_cities'] - 1
-        n_close = 26
+        n_close = self.config['num_cities'] - 1
+        #n_close = 26
+        #n_close = 10
         state = dict()
 
-        state['x_a'] = np.zeros([1, len(self.robots), len(self.cities) + 1])
+        state['x_a'] = np.zeros([1, len(self.robots), len(self.cities) + 1, 3])
         # (n_batch, n_robot, n_nodes), assignments to nodes, for base node, only d_max is considered
         state['x_b'] = np.zeros([1, len(self.cities) + 1, 1])
+        # (n_batch, 1, n_nodes), distance to base of each nodes, for base node, 0 is constant input
+        state['coord'] = np.zeros([1, len(self.cities) + 1, 2])
         # (n_batch, 1, n_nodes), distance to base of each nodes, for base node, 0 is constant input
         state['edge'] = np.zeros([1, len(self.cities), len(self.cities) + 1, 3]) 
         # (n_batch, n_cities, n_nodes, 3), distance to node, distance to base, is_targeting_base
@@ -292,12 +295,37 @@ class MTSP(Env):
         state['assignment_prev'] = np.zeros([1, len(self.robots), len(self.cities) + 1])
         # (n_batch, n_robots, n_nodes) previous assignments
 
+        state['avail_node_presence'][0, 0, -1] = 1
+        state['coord'][0, -1, :] = np.array([self.base.x, self.base.y])
+        for idx_city, city in enumerate(self.cities):
+            state['x_b'][0, idx_city, 0] = self.config['scale_distance'] * city.distance(self.base)
+            state['avail_node_presence'][0, 0, idx_city] = float(not city.is_visited)
+            state['coord'][0, idx_city, :] = np.array([city.x, city.y])
+
+            for _idx_city, _city in enumerate(self.cities):
+                state['edge'][0, idx_city, _idx_city, :] = np.array([
+                    self.config['scale_distance'] * city.distance(_city), 
+                    self.config['scale_distance'] * city.distance(self.base), 
+                    0
+                    ])
+            state['edge'][0, idx_city, -1, :] = np.array([
+                self.config['scale_distance'] * city.distance(self.base), 
+                self.config['scale_distance'] * city.distance(self.base), 
+                1
+                ])
+
+        avg_coord = np.mean(state['coord'], axis=1).reshape(1, 1, 2)
+        std_coord = np.mean((state['coord'] - avg_coord) ** 2, axis=1).reshape(1, 1, 2) ** 0.5
+        state['coord'] = (state['coord'] - avg_coord) / std_coord
+
         is_all_assignment_none_or_base = []
         for idx_robot, robot in enumerate(self.robots):
             for idx_city, city in enumerate(self.cities):
-                state['x_a'][0, idx_robot, idx_city] = self.config['scale_distance'] * robot.distance(city)
+                state['x_a'][0, idx_robot, idx_city, 0] = self.config['scale_distance'] * robot.distance(city)
+                state['x_a'][0, idx_robot, idx_city, 1:] = np.array([city.x - robot.x, city.y - robot.y]) / std_coord
                 state['avail_node_action'][0, idx_robot, idx_city] = float(city.is_available())
-            state['x_a'][0, idx_robot, -1] = self.config['scale_distance'] * robot.distance(self.base)
+            state['x_a'][0, idx_robot, -1, 0] = self.config['scale_distance'] * robot.distance(self.base)
+            state['x_a'][0, idx_robot, -1, 1:] = np.array([self.base.x - robot.x, self.base.y - robot.y]) / std_coord
             
             if not robot.assigned_city is None:
                 if type(robot.assigned_city) == Base:
@@ -312,14 +340,14 @@ class MTSP(Env):
             state['avail_robot'][0, 0, idx_robot] = float(not (robot.is_assigned or robot.is_returned_to_base))
 
         dist_sorted = np.sort(
-            state['avail_node_action'][0, :, :-1] * state['x_a'][0, :, :-1]
-            + (1 - state['avail_node_action'][0, :, :-1]) * np.max(state['x_a'][0, :, :-1] + 10)
+            state['avail_node_action'][0, :, :-1] * state['x_a'][0, :, :-1, 0]
+            + (1 - state['avail_node_action'][0, :, :-1]) * np.max(state['x_a'][0, :, :-1, 0] + 10)
             , axis=1
             )
         
         n_remaining_cities = np.sum(state['avail_node_action'][0, 0, :-1])
         dist_threshold_closest = dist_sorted[:, n_close].reshape(-1, 1)
-        is_in_threshold = state['x_a'][0, :, :-1] < dist_threshold_closest
+        is_in_threshold = state['x_a'][0, :, :-1, 0] < dist_threshold_closest
         state['avail_node_action'][0, :, :-1] = is_in_threshold * state['avail_node_action'][0, :, :-1]
 
         is_all_assignment_none_or_base = np.array(is_all_assignment_none_or_base).all()
@@ -328,24 +356,6 @@ class MTSP(Env):
             or not is_all_assignment_none_or_base
             ):
             state['avail_node_action'][0, :, -1] = 1
-            
-        state['avail_node_presence'][0, 0, -1] = 1
-        for idx_city, city in enumerate(self.cities):
-            state['x_b'][0, idx_city, 0] = self.config['scale_distance'] * city.distance(self.base)
-            state['avail_node_presence'][0, 0, idx_city] = float(not city.is_visited)
-
-            for _idx_city, _city in enumerate(self.cities):
-                state['edge'][0, idx_city, _idx_city, :] = np.array([
-                    self.config['scale_distance'] * city.distance(_city), 
-                    self.config['scale_distance'] * city.distance(self.base), 
-                    0
-                    ])
-            state['edge'][0, idx_city, -1, :] = np.array([
-                self.config['scale_distance'] * city.distance(self.base), 
-                self.config['scale_distance'] * city.distance(self.base), 
-                1
-                ])
-        
 
         return state
                 
