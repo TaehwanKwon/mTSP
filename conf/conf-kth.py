@@ -33,7 +33,10 @@ config = {
         'step': 100000,
         'algorithm': 'optimal_q_learning',
         #'algorithm': 'sarsa',
-        'lr': 2.5e-4,
+        'lr_start': 5e-4,
+        'lr_end': 1e-4,
+        'lr_step': 500,
+        'lr_decay': 0.99, 
         'eps': { # eps = eps_end + eps_add * half_life / (half_life + training_step)
             'add': 0.45,
             'end': 0.05,
