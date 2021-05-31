@@ -33,7 +33,7 @@ def test(config, model, step_train=0, path_log=None):
     score = 0
     while not done:
         action = model.action(s, softmax=False)
-        if score !=0: print(f"p_max: {model.p.max():.3f}, p_min: {model.p.min():.3f}")
+        #if score !=0: print(f"p_max: {model.p.max():.3f}, p_min: {model.p.min():.3f}")
         s_next, reward, done = env.step(action['list'])
         s = s_next
         score += reward
@@ -62,17 +62,24 @@ def train(args, config, model, agent, simulator):
         f = open(f"{path_log}/comment.txt", 'w')
         f.write(path_prev)
         f.close()
+        os.system(f"rsync -av --progress . {path_log}/ --exclude logs")
 
     step_prev = args.step_prev
     model.step_train = step_prev
     
-    optimizer = Adam(model.parameters(), lr=config['learning']['lr'])
+    optimizer = Adam(model.parameters(), lr=config['learning']['lr_start'])
     logger_tool = LoggerTool(path_log)
 
     _time_10_step = time.time()
     simulator.save_to_replay_buffer(config['learning']['size_replay_buffer'])
     logger.info("###### Start training #####")
     for step_train in range(step_prev, config['learning']['step'] + 1):
+        optimizer.param_groups[0]['lr'] = (
+            config['learning']['lr_end'] 
+            + config['learning']['lr_decay'] ** (step_train // config['learning']['lr_step']) * (
+                config['learning']['lr_start'] - config['learning']['lr_end']
+                )
+            )
         _time_train = time.time()
         
         model.step_train = step_train
@@ -88,12 +95,12 @@ def train(args, config, model, agent, simulator):
             # showing and writing loss
             time_10_step = time.time() - _time_10_step
             print(
-                f"[{step_train}] loss: {loss:.3f}, "
+                f"[{step_train}] lr: {optimizer.param_groups[0]['lr']:.5f} loss: {loss:.3f}, "
                 + f"time_10_step: {time_10_step:.2f} "
                 )
             _time_10_step = time.time()
 
-        if step_train % 200 == 0:
+        if step_train % 25 == 0:
             # adding new data to replay buffer
             simulator.save_to_replay_buffer(config['learning']['size_batch'])
             
@@ -150,6 +157,7 @@ if __name__=='__main__':
     
     try:
         train(args, config, model, agent, simulator)
+        simulator.terminate()
     except KeyboardInterrupt:
         # terminate processes generated for collecting data
         simulator.terminate()
