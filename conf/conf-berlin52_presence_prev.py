@@ -31,7 +31,7 @@ config = {
         'eps': { # eps = eps_end + eps_add * half_life / (half_life + training_step)
             'add': 0.9,
             'end': 0.1,
-            'half_life': 5000,
+            'half_life': 10000,
             },
         'gamma': 1.0,
         'size_batch': 64,
