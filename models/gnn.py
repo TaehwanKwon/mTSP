@@ -153,6 +153,7 @@ class Model(nn.Module):
         mask_presence = mask_presence * avail_node_presence 
         logit_presence = h2_presence * mask_presence - (1 - mask_presence) * 1e10
         presence_out = torch.softmax(logit_presence, dim = -1)
+        presence_out = avail_node_presence[:, :, :-1].transpose(-2, -1) * presence_out
         presence_in = presence_out.transpose(1, 2).unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
 
         edge_dist = edge[:, :, :, 0:1].transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
