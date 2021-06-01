@@ -23,7 +23,10 @@ config = {
         'step': 200000,
         'algorithm': 'optimal_q_learning',
         #'algorithm': 'sarsa',
-        'lr': 1e-4,
+        'lr_start': 5e-4,
+        'lr_end': 1e-4,
+        'lr_step': 500,
+        'lr_decay': 0.99, 
         'eps': { # eps = eps_end + eps_add * half_life / (half_life + training_step)
             'add': 0.9,
             'end': 0.1,
