@@ -35,6 +35,7 @@ config = {
         'gamma': 1.0,
         'size_batch': 64,
         'size_replay_buffer': 10000,
+        'num_rollout':1,
         'num_processes': 4,
     }
 }
