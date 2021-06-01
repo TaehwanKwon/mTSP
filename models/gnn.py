@@ -65,10 +65,10 @@ class Model(nn.Module):
         self.tau = 2.
         self.base_hidden_size = 64
         self.bias = True
-        self.sigma = 1e-1
+        self.sigma = 1e-3
 
-        self.T1 = 5
-        self.T2 = 5
+        self.T1 = 4
+        self.T2 = 4
 
         # Used for estimating presence probabilities
         self.fc1_presence = nn.Linear(3, self.base_hidden_size, bias=self.bias)
