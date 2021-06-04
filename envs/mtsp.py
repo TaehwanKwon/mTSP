@@ -110,7 +110,7 @@ class MTSP(Env):
     def __init__(self, config_env):
         self.config = config_env
         self.finished_robots = []
-        self.robot_color_list = ['red', 'blue', 'purple', 'orange', 'sky', 'yellow', 'pink']
+        self.robot_color_list = ['red', 'blue', 'purple', 'orange', 'darkcyan', 'peru', 'brown']
         
         self._from_file()
 
