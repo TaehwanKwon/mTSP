@@ -20,7 +20,7 @@ config = {
         'scale_reward':2.5e-4,
     },
     'learning':{
-        'step': 200000,
+        'step': 400000,
         'presence_prev':False,
         'algorithm': 'optimal_q_learning',
         #'algorithm': 'sarsa',
