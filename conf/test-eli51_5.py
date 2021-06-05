@@ -5,10 +5,10 @@ sys.path.append(os.path.abspath( os.path.join(os.path.dirname(__file__), "..")))
 config = {
     'env':{
         'name':'MTSP',
-        'num_robots': 4,
-        'num_cities': 51,
-        'file': 'berlin52.txt',
-        'scale_distance': 1e-3,
+        'num_robots': 5,
+        'num_cities': 50,
+        'file': 'eli51.txt',
+        'scale_distance': 0.018,
         'scale_reward':2.5e-4,
     },
     'learning':{

@@ -8,7 +8,7 @@ config = {
         'num_robots': 7,
         'num_cities': 75,
         'file': 'eli76.txt',
-        'scale_distance': 0.0229,
+        'scale_distance': 0.018,
         'scale_reward':2.5e-4,
     },
     'learning':{

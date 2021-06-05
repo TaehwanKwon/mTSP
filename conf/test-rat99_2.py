@@ -8,7 +8,7 @@ config = {
         'num_robots': 2,
         'num_cities': 98,
         'file': 'rat99.txt',
-        'scale_distance': 0.00737,
+        'scale_distance': 0.004,
         'scale_reward':2.5e-4,
     },
     'learning':{
