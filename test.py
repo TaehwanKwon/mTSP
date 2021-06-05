@@ -45,7 +45,7 @@ def test(config, model):
     amplitude = max(costs) - min(costs)
 
     name_test = config['env']['file'].split('.')[0]
-    path_test = f"test/{name_test}"
+    path_test = f"test/[{now.strftime('%y%m%d')}][{now.strftime('%H-%M-%S')}]/{name_test}"
     os.makedirs(path_test, exist_ok=True)
     env.draw(path=path_test + f"/location_history-{name_test}_{config['env']['num_robots']}.png")
 
