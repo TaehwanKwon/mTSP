@@ -18,18 +18,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from threading import Thread
-
-def _get_argmax_action(model, done_tuple, state_next_tuple, action):
-
-    argmax_action_list = []
-    for idx, state_next in enumerate(state_next_tuple):
-        if not done_tuple[idx]:
-            argmax_action = model.action(state_next)
-        else:
-            argmax_action = {'numpy': np.zeros([ *action.shape ])} # add an unused dummy action if the game is done
-        argmax_action_list.append(argmax_action['numpy'])
-    
-    return argmax_action_list
+from utils import Simulator
 
 class ReplayBuffer:
     def __init__(self, config):
@@ -90,6 +79,7 @@ class Model(nn.Module):
         self.tau_softmax = 0.5
 
         self.extra_gpus = extra_gpus
+        self.simulator = Simulator(config, self)
 
     def set_extra_gpus(self):
         self.model_list = [self]
@@ -166,11 +156,7 @@ class Model(nn.Module):
 
         # First convolution of graphs
         for t in range(self.T1):
-            ## Original concating method
-            # edge_dist = edge[:, :, :, 0:1].transpose(1, 2) # (n_batch, n_nodes, n_cities, 1), distance between each nodes & cities
-            # u_a_rep = u_a.unsqueeze(1).repeat(1, n_nodes, 1, 1)[:, :, :-1, :] # (n_batch. n_nodes, n_cities, self.base_hidden_size)
-            # u_a_rep = torch.cat([u_a_rep, edge_dist], dim=-1) # (n_batch. n_nodes, n_cities, self.base_hidden_size + 1)
-            
+            ## Original concating method            
             embedding_dist_1 = torch.tanh(self.fc_embedding_1(edge_dist)) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
             embedding_dist_1 = u[:, :-1, :].unsqueeze(1) * embedding_dist_1 # (n_batch, 1 -> n_nodes, n_cities, self.base_hidden_size)
 
