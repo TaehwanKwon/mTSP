@@ -67,8 +67,9 @@ class Model(M):
         for t in range(self.T1):
             ## Original concating method
             
-            embedding_dist_1 = self.ln_embedding_1( torch.tanh( self.fc_embedding_1(edge_dist)) ) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
-            embedding_dist_1 = u[:, :-1, :].unsqueeze(1) * embedding_dist_1 # (n_batch, 1 -> n_nodes, n_cities, self.base_hidden_size)
+            #embedding_dist_1 = self.ln_embedding_1( torch.tanh( self.fc_embedding_1(edge_dist)) ) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_1 = self.fc_embedding_1(edge_dist) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_1 = u[:, :-1, :].unsqueeze(1) + embedding_dist_1 # (n_batch, 1 -> n_nodes, n_cities, self.base_hidden_size)
 
             l_1 = torch.matmul(presence_in, embedding_dist_1) # (n_batch, n_nodes, 1, self.base_hidden_size)
             l_1 = l_1.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size)
@@ -78,8 +79,9 @@ class Model(M):
         del l_1, x, x_a, x_b
         # Second convolution of graphs
         for t in range(self.T2):
-            embedding_dist_2 = self.ln_embedding_2( torch.tanh(self.fc_embedding_2(edge_dist)) )# (n_batch, n_nodes, n_cities, self.base_hidden_size)
-            embedding_dist_2 = gamma[:, :-1, :].unsqueeze(1) * embedding_dist_2 # (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            #embedding_dist_2 = self.ln_embedding_2( torch.tanh(self.fc_embedding_2(edge_dist)) )# (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_2 = self.fc_embedding_2(edge_dist)# (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_2 = gamma[:, :-1, :].unsqueeze(1) + embedding_dist_2 # (n_batch, n_nodes, n_cities, self.base_hidden_size)
 
             l_2 = torch.matmul(presence_in, embedding_dist_2) # (n_batch, n_nodes, 1, self.base_hidden_size)
             l_2 = l_2.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size
