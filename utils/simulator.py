@@ -8,7 +8,6 @@ sys.path.append(os.path.abspath( os.path.join(os.path.dirname(__file__), "..")))
 # os.environ['MKL_SERIAL'] = 'YES'
 
 from envs.mtsp_simple import MTSP, MTSPSimple
-from models.gnn import Model
 
 import numpy as np
 import torch
@@ -22,51 +21,116 @@ logger = logging.getLogger(__name__)
 
 import time
 
+def get_argmax_action(model, done_tuple, state_next_tuple, action):
 
-def get_data(model_shared, config, q_data, q_count, q_eps):
+    argmax_action_list = []
+    for idx, state_next in enumerate(state_next_tuple):
+        if not done_tuple[idx]:
+            argmax_action = model.action(state_next)
+        else:
+            argmax_action = {'numpy': np.zeros([ *action.shape ])} # add an unused dummy action if the game is done
+        argmax_action_list.append(argmax_action['numpy'])
     
-    model = model_shared
+    return argmax_action_list
+
+def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, q_model):
+    device = idx % torch.cuda.device_count()
+    model = __import__(f"models.{config['learning']['model']}", fromlist=[None]).Model(config, device).to(device)
+
+    num_collection = 100
+    rollout = {
+        'state': list(),
+        'action': list(),
+        'reward': list(),
+        'sards':list(),
+    }
 
     env = eval(f"{config['env']['name']}(config['env'])")
     s = env.reset()
-
-    num_collection = 50
-
     while True:
-        count = q_count.get()
-        eps = q_eps.get(); q_eps.put(eps)
+        if q_count.qsize() > 0:
+            count = q_count.get()
+            eps = q_eps.get(); q_eps.put(eps)
 
-        if count >= num_collection:
-            count = count - num_collection
-            _num_collection = num_collection
-            q_count.put(count)
-        else:
-            _num_collection = count
-            count = 0
-
-        for _ in range(_num_collection):
-            if np.random.rand() < eps:
-                action = model.random_action(s)
+            if count >= num_collection:
+                count = count - num_collection
+                _num_collection = num_collection
+                q_count.put(count)
             else:
-                action = model.action(s)
-            s_next, reward, done = env.step(action['list'])
-            sards = (s, action['numpy'], reward, done, s_next)
-            q_data.put(sards)
+                _num_collection = count
+                count = 0
 
-            if done:
-                s = env.reset()
+            flag_models = q_flag_models.get()
+            if flag_models[idx]:
+                flag_models[idx] = False
+                q_flag_models.put(flag_models)
+            
+                state_dict_cpu = q_model.get()
+                q_model.put(state_dict_cpu)
+                state_dict_gpu = {key: state_dict_cpu[key].to(device) for key in state_dict_cpu}
+                model.load_state_dict(state_dict_gpu)
             else:
-                s = s_next
+                q_flag_models.put(flag_models)
+            
+            num_data = 0
+            num_remaining_data = len(rollout['sards'])
+            while num_data < _num_collection - num_remaining_data:
+                _time_test = time.time()
+                if np.random.rand() < eps:
+                    #action = model.action(s, softmax=True)
+                    action = model.random_action(s)
+                else:
+                    action = model.action(s, softmax=False)
+                time_test = time.time() - _time_test
+                #print(f"time_test: {time_test}")
+                s_next, reward, done = env.step(action['list'])
+                
+                rollout['state'].append(s)
+                rollout['action'].append(action['numpy'])
+                rollout['reward'].append(reward)
+                
+                if not done and len(rollout['state'])==config['learning']['num_rollout']:
+                    sards = (rollout['state'][0], rollout['action'][0], sum(rollout['reward']), done, s_next)
+                    rollout['state'].pop(0)
+                    rollout['action'].pop(0)
+                    rollout['reward'].pop(0)
+                    rollout['sards'].append(sards)
+                    num_data += 1
+                elif done:
+                    for i in range(config['learning']['num_rollout']):
+                        sards = (rollout['state'][0], rollout['action'][0], sum(rollout['reward']), done, s_next)
+                        rollout['state'].pop(0)
+                        rollout['action'].pop(0)
+                        rollout['reward'].pop(0)
+                        rollout['sards'].append(sards)
+                        num_data += 1
 
-def get_data_sarsa(model_shared, config, q_data, q_count, q_eps):
-    
+                    assert len(rollout['state'])==0, f"the length of left state should be zero, currently {len(rollout['state'])}"
+
+                if done:
+                    s = env.reset()
+                else:
+                    s = s_next
+
+            for _ in range(_num_collection):
+                sards = rollout['sards'].pop(0)
+                q_data.put(sards)
+        
+        elif q_data_argmax.qsize() > 0:
+            idx_data, data_argmax =  q_data_argmax.get()
+            _done_tuple, _state_next_tuple, _action = data_argmax
+            argmax_action_list = get_argmax_action(model, _done_tuple, _state_next_tuple, _action)
+            q_data.put( (idx_data, argmax_action_list) )
+        time.sleep(1e-3)
+
+def get_data2(idx, config, q_data, q_count, q_eps, q_flag_models, q_model):    
     model = model_shared
 
     env = eval(f"{config['env']['name']}(config['env'])")
     s = env.reset()
     s_prev,  action_prev, reward_prev, done_prev = None, None, None, None
 
-    num_collection = 50
+    num_collection = 100
 
     while True:
         count = q_count.get()
@@ -85,10 +149,11 @@ def get_data_sarsa(model_shared, config, q_data, q_count, q_eps):
                 action = None
             else:
                 if np.random.rand() < eps:
-                    action = model.random_action(s)
+                    #action = model.random_action(s)
+                    action = model.action(s, softmax=True)
                 else:
                     _time_test = time.time()
-                    action = model.action(s)
+                    action = model.action(s, softmax=False)
                     time_test = time.time() - _time_test
                     #print(f"time_test: {time_test}")
                 s_next, reward, done = env.step(action['list'])
@@ -112,20 +177,17 @@ class Simulator:
     def __init__(self, config, model):
         self.config = config
         self.model = model # Should be sheard by model.shared_memory()
-        if self.model.device == 'cpu':
-            self.model_cpu = self.model
-        else:
-            #self.model_cpu = copy.deepcopy(self.model).cpu()
-            #self.model_cpu.device = 'cpu'
-            self.model_cpu = self.model
-        self.model_cpu.share_memory()
 
+    def start(self):
         self.q_data = mp.Queue()
+        self.q_data_argmax = mp.Queue()
         self.q_count = mp.Queue()
         self.q_eps = mp.Queue()
+        self.q_model = mp.Queue()
+        self.q_flag_models = mp.Queue()
 
-        self.procs = []
-        for _ in range(self.config['learning']['num_processes']):
+        self.procs = list()
+        for idx in range(self.config['learning']['num_processes']):
             target_func = None
             learning_algorithm = self.config['learning']['algorithm']
             if learning_algorithm == 'optimal_q_learning':
@@ -137,7 +199,7 @@ class Simulator:
 
             proc = mp.Process(
                 target = target_func, 
-                args = (self.model_cpu, self.config, self.q_data, self.q_count, self.q_eps,)
+                args = (idx, self.config, self.q_data, self.q_data_argmax, self.q_count, self.q_eps, self.q_flag_models, self.q_model)
                 )
             proc.start()
             self.procs.append(proc)
@@ -149,29 +211,36 @@ class Simulator:
         eps = eps_end +  eps_add * half_life / (half_life + self.model.step_train)
         return eps
 
-    def sync_model(self):
-        if not self.model.device == 'cpu':
-            state_dict = self.model.state_dict()
-            state_dict = { key: state_dict[key].cpu() for key in state_dict }
-            self.model_cpu.load_state_dict(state_dict)
+    def get_state_dict_cpu(self):
+        state_dict = self.model.state_dict()
+        state_dict = { key: state_dict[key].cpu() for key in state_dict }
+
+        return state_dict
 
     def save_to_replay_buffer(self, size):
         num_data = size
         eps = self.get_eps()
-        self.sync_model()
+        state_dict_cpu = self.get_state_dict_cpu()
+
         self.q_count.put(size)
         self.q_eps.put(eps)
+        self.q_model.put(state_dict_cpu)
+        self.q_flag_models.put( [True for _ in range(self.config['learning']['num_processes'])] )
 
+        num_data_prev = 0
         while num_data > 0:
             if num_data % 100 == 0:
-                logger.debug(f"collecting data.. {num_data} are left")
-                #print(f"collecting data.. {num_data} are left")
+                if num_data != num_data_prev:
+                    logger.debug(f"collecting data.. {num_data} are left")
+                    print(f"collecting data.. {num_data} are left")
+                    num_data_prev = num_data
             if self.q_data.qsize() > 0 :
                 sards = self.q_data.get()
                 self.model.add_to_replay_buffer(sards)
                 num_data = num_data - 1
             else:
                 time.sleep(1e-3)
+        self.q_eps.get()
 
     def terminate(self):
         for proc in self.procs:
