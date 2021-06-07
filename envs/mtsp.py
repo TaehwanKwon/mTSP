@@ -351,10 +351,10 @@ class MTSP(Env):
 
             for idx_city, city in enumerate(self.cities):
                 state['x_a'][0, idx_robot, idx_city, 0] = scale_dist * robot.distance(city) / std_dist
-                state['x_a'][0, idx_robot, idx_city, 1:] = scale_coord * np.array([city.x - robot.x, city.y - robot.y]) / std_coord
+                state['x_a'][0, idx_robot, idx_city, 1:] = scale_coord * np.array([robot.x - city.x, robot.y - city.y]) / std_coord
                 state['avail_node_action'][0, idx_robot, idx_city] = float(city.is_available())
             state['x_a'][0, idx_robot, -1, 0] = scale_dist * robot.distance(self.base) / std_dist
-            state['x_a'][0, idx_robot, -1, 1:] = scale_coord * np.array([self.base.x - robot.x, self.base.y - robot.y]) / std_coord
+            state['x_a'][0, idx_robot, -1, 1:] = scale_coord * np.array([robot.x - self.base.x, robot.y - self.base.y]) / std_coord
             
             if not robot.assigned_city is None:
                 if type(robot.assigned_city) == Base:
