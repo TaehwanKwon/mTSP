@@ -218,6 +218,7 @@ class Simulator:
         return state_dict
 
     def save_to_replay_buffer(self, size):
+        print("getting data..")
         num_data = size
         eps = self.get_eps()
         state_dict_cpu = self.get_state_dict_cpu()
@@ -241,6 +242,7 @@ class Simulator:
             else:
                 time.sleep(1e-3)
         self.q_eps.get()
+        print("got data!!")
 
     def terminate(self):
         for proc in self.procs:
