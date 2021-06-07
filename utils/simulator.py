@@ -8,7 +8,6 @@ sys.path.append(os.path.abspath( os.path.join(os.path.dirname(__file__), "..")))
 # os.environ['MKL_SERIAL'] = 'YES'
 
 from envs.mtsp_simple import MTSP, MTSPSimple
-from models.gnn import Model, _get_argmax_action
 
 import numpy as np
 import torch
@@ -22,9 +21,21 @@ logger = logging.getLogger(__name__)
 
 import time
 
+def get_argmax_action(model, done_tuple, state_next_tuple, action):
+
+    argmax_action_list = []
+    for idx, state_next in enumerate(state_next_tuple):
+        if not done_tuple[idx]:
+            argmax_action = model.action(state_next)
+        else:
+            argmax_action = {'numpy': np.zeros([ *action.shape ])} # add an unused dummy action if the game is done
+        argmax_action_list.append(argmax_action['numpy'])
+    
+    return argmax_action_list
+
 def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, q_model):
     device = idx % torch.cuda.device_count()
-    model = Model(config, device).to(device)
+    model = __import__(f"models.{config['learning']['model']}", fromlist=[None]).Model(config, device).to(device)
 
     num_collection = 100
     rollout = {
@@ -108,7 +119,7 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
         elif q_data_argmax.qsize() > 0:
             idx_data, data_argmax =  q_data_argmax.get()
             _done_tuple, _state_next_tuple, _action = data_argmax
-            argmax_action_list = _get_argmax_action(model, _done_tuple, _state_next_tuple, _action)
+            argmax_action_list = get_argmax_action(model, _done_tuple, _state_next_tuple, _action)
             q_data.put( (idx_data, argmax_action_list) )
         time.sleep(1e-3)
 
@@ -168,6 +179,7 @@ class Simulator:
         self.config = config
         self.model = model # Should be sheard by model.shared_memory()
 
+    def start(self):
         self.q_data = mp.Queue()
         self.q_data_argmax = mp.Queue()
         self.q_count = mp.Queue()
