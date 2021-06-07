@@ -21,7 +21,7 @@ config = {
     },
     'learning':{
         'step': 100000,
-        'model': 'gnn',
+        'model': 'gnn_res',
         'algorithm': 'optimal_q_learning',
         #'algorithm': 'sarsa',
         'lr_start': 5e-4,
@@ -35,7 +35,7 @@ config = {
             },
         'gamma': 1.0,
         'size_batch': 64,
-        'size_replay_buffer': 10000,
+        'size_replay_buffer': 2500,
         'num_rollout':1,
         'num_processes': 4,
     }
