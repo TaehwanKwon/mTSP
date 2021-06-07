@@ -13,6 +13,7 @@ config = {
     },
     'learning':{
         'step': 400000,
+        'model': 'gnn',
         'presence_prev':False,
         'algorithm': 'optimal_q_learning',
         #'algorithm': 'sarsa',

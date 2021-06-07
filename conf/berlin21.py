@@ -9,7 +9,7 @@ config = {
         'num_cities': 20,
         'file': 'berlin21.txt',
         'scale_distance': 1e-3,
-        'scale_reward':2.5e-4,
+        'scale_reward':5e-2,
     },
     'env_test':{
         'name':'MTSP',
@@ -17,10 +17,11 @@ config = {
         'num_cities': 20,
         'file': 'berlin21.txt',
         'scale_distance': 1e-3,
-        'scale_reward':2.5e-4,
+        'scale_reward':5e-2,
     },
     'learning':{
         'step': 100000,
+        'model': 'gnn',
         'algorithm': 'optimal_q_learning',
         #'algorithm': 'sarsa',
         'lr_start': 5e-4,

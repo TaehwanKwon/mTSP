@@ -21,10 +21,11 @@ config = {
     },
     'learning':{
         'step': 200000,
+        'model': 'gnn',
         'presence_prev':True,
         'algorithm': 'optimal_q_learning',
         #'algorithm': 'sarsa',
-        'lr_start': 5e-4,
+        'lr_start': 1e-4,
         'lr_end': 1e-4,
         'lr_step': 500,
         'lr_decay': 0.99, 
