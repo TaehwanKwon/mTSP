@@ -47,9 +47,9 @@ def test(config, model, step_train=0, path_log=None):
 
     model.config['env'] = config['env'] # Rollback the configuration of environment
 
-    return sum(costs), max(costs), amplitude
+    return sum(costs), max(costs), amplitude, score
 
-def train(args, config, model, agent, simulator):
+def train(args, config, model, agent):
     now = datetime.now()
     path_log = f"logs/[{now.strftime('%y%m%d')}][{now.strftime('%H-%M-%S')}]"
     os.makedirs(path_log, exist_ok=True)
@@ -71,7 +71,8 @@ def train(args, config, model, agent, simulator):
     logger_tool = LoggerTool(path_log)
 
     _time_10_step = time.time()
-    simulator.save_to_replay_buffer(config['learning']['size_replay_buffer'])
+    model.simulator.start()
+    model.simulator.save_to_replay_buffer(config['learning']['size_replay_buffer'])
     logger.info("###### Start training #####")
     for step_train in range(step_prev, config['learning']['step'] + 1):
         optimizer.param_groups[0]['lr'] = (
@@ -102,15 +103,16 @@ def train(args, config, model, agent, simulator):
 
         if step_train % 25 == 0:
             # adding new data to replay buffer
-            simulator.save_to_replay_buffer(config['learning']['size_batch'])
+            model.simulator.save_to_replay_buffer(config['learning']['size_batch'])
             
         if step_train % 100 == 0:
             # Test the performance of the training agent
-            total_cost, max_cost, amplitude = test(config, model, step_train=step_train, path_log=path_log)
+            total_cost, max_cost, amplitude, score = test(config, model, step_train=step_train, path_log=path_log)
             print(
                 f"toptal_cost: {total_cost} "
                 + f"max_cost: {max_cost} "
                 + f"amplitude: {amplitude} "
+                + f"score: {score} "
                     )
             logger_tool.write(
                 step_train, 
@@ -130,7 +132,7 @@ def train(args, config, model, agent, simulator):
             torch.save(state_dict_cpu, f"{path_log}/model_{step_train}.pt")
 
     # kill spawned processes
-    simulator.terminate()
+    model.simulator.terminate()
 
 if __name__=='__main__':
     mp.set_start_method('spawn')
@@ -148,19 +150,18 @@ if __name__=='__main__':
     
 
     config = __import__(f'conf.{args.conf}', fromlist=[None]).config
-    model = Model(config, device).to(device)
+    model = __import__(f"models.{config['learning']['model']}", fromlist=[None]).Model(config, device).to(device)
     model.initialize_batch()
-    model.set_extra_gpus()    
+    model.set_extra_gpus()
     agent = Agent(config)
-    simulator = Simulator(config, model)
-    model.simulator = simulator
+    
     
     try:
-        train(args, config, model, agent, simulator)
-        simulator.terminate()
+        train(args, config, model, agent)
+        model.simulator.terminate()
     except KeyboardInterrupt:
         # terminate processes generated for collecting data
-        simulator.terminate()
+        model.simulator.terminate()
 
 
 
