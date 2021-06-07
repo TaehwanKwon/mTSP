@@ -277,6 +277,9 @@ class MTSP(Env):
         #n_close = 10
         state = dict()
 
+        scale_dist = 0.05
+        scale_coord = 0.1
+
         state['x_a'] = np.zeros([1, len(self.robots), len(self.cities) + 1, 3])
         # (n_batch, n_robot, n_nodes), assignments to nodes, for base node, only d_max is considered
         state['x_b'] = np.zeros([1, len(self.cities) + 1, 1])
@@ -318,19 +321,22 @@ class MTSP(Env):
                 ])
         # calculate avg, std for remaining nodes
         n_present = np.sum(state['avail_node_presence'])
-        avg_coord = np.sum(
-            state['avail_node_presence'].transpose(0, 2, 1) * state['coord'],
-            axis=1
-            ).reshape(1, 1, 2) / n_present
-        std_coord = np.sum(
-            state['avail_node_presence'].transpose(0, 2, 1) * (state['coord'] - avg_coord) ** 2,
-            axis=1
-            ).reshape(1, 1, 2) ** 0.5 / n_present
+        avg_coord = np.mean(state['coord'])
+        std_coord = np.mean((state['coord'] - avg_coord) ** 2) ** 0.5
+        # avg_coord = np.sum(
+        #     state['avail_node_presence'].transpose(0, 2, 1) * state['coord'],
+        #     axis=1
+        #     ).reshape(1, 1, 2) / n_present
+        # std_coord = 1e-3 + np.sum(
+        #     state['avail_node_presence'].transpose(0, 2, 1) * (state['coord'] - avg_coord) ** 2,
+        #     axis=1
+        #     ).reshape(1, 1, 2) ** 0.5 / n_present
         std_dist = np.sum(std_coord ** 2) ** 0.5
+        self.std_dist = std_dist
         
-        state['x_b'] = state['x_b'] / std_dist
-        state['coord'] = (state['coord'] - avg_coord) / std_coord
-        state['edge'][:,:,0:2] = state['edge'][:,:,0:2] / std_dist
+        state['x_b'] = scale_dist * state['x_b'] / std_dist
+        state['coord'] = scale_coord * (state['coord'] - avg_coord) / std_coord
+        state['edge'][0,:,:,0:2] = scale_dist * state['edge'][0,:,:,0:2] / std_dist
 
         is_all_assignment_none_or_base = []
         for idx_robot, robot in enumerate(self.robots):
@@ -344,11 +350,11 @@ class MTSP(Env):
                         state['presence_prev'][0, city1.id, -1] = 1
 
             for idx_city, city in enumerate(self.cities):
-                state['x_a'][0, idx_robot, idx_city, 0] = robot.distance(city) / std_dist
-                state['x_a'][0, idx_robot, idx_city, 1:] = np.array([city.x - robot.x, city.y - robot.y]) / std_coord
+                state['x_a'][0, idx_robot, idx_city, 0] = scale_dist * robot.distance(city) / std_dist
+                state['x_a'][0, idx_robot, idx_city, 1:] = scale_coord * np.array([city.x - robot.x, city.y - robot.y]) / std_coord
                 state['avail_node_action'][0, idx_robot, idx_city] = float(city.is_available())
-            state['x_a'][0, idx_robot, -1, 0] = robot.distance(self.base) / std_dist
-            state['x_a'][0, idx_robot, -1, 1:] = np.array([self.base.x - robot.x, self.base.y - robot.y]) / std_coord
+            state['x_a'][0, idx_robot, -1, 0] = scale_dist * robot.distance(self.base) / std_dist
+            state['x_a'][0, idx_robot, -1, 1:] = scale_coord * np.array([self.base.x - robot.x, self.base.y - robot.y]) / std_coord
             
             if not robot.assigned_city is None:
                 if type(robot.assigned_city) == Base:
@@ -411,7 +417,7 @@ class MTSP(Env):
         time_spent, done = self.update_robots()
         state_next = self.get_numpy_state()
         
-        reward = - self.config['scale_reward'] * time_spent
+        reward = - self.config['scale_reward'] * time_spent / self.std_dist
 
         return state_next, reward, done
 
