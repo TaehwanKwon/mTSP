@@ -12,10 +12,10 @@ class Model(M):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.ln_u = nn.LayerNorm(self.base_hidden_size)
-        self.ln_embedding_1 = nn.LayerNorm(self.base_hidden_size)
+        #self.ln_embedding_1 = nn.LayerNorm(self.base_hidden_size)
 
         self.ln_gamma = nn.LayerNorm(self.base_hidden_size)
-        self.ln_embedding_2 = nn.LayerNorm(self.base_hidden_size)
+        #self.ln_embedding_2 = nn.LayerNorm(self.base_hidden_size)
 
     def forward(self, state, action):
         ''' 
@@ -68,25 +68,25 @@ class Model(M):
             ## Original concating method
             
             #embedding_dist_1 = self.ln_embedding_1( torch.tanh( self.fc_embedding_1(edge_dist)) ) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
-            embedding_dist_1 = self.fc_embedding_1(edge_dist) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
-            embedding_dist_1 = u[:, :-1, :].unsqueeze(1) + embedding_dist_1 # (n_batch, 1 -> n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_1 = torch.tanh( self.fc_embedding_1(edge_dist)) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_1 = u[:, :-1, :].unsqueeze(1) * embedding_dist_1 # (n_batch, 1 -> n_nodes, n_cities, self.base_hidden_size)
 
             l_1 = torch.matmul(presence_in, embedding_dist_1) # (n_batch, n_nodes, 1, self.base_hidden_size)
             l_1 = l_1.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size)
             #l_a = torch.matmul(presence_in, u_a[:, :-1, :])
-            u = u + self.ln_u( torch.relu(self.fc_l_1(l_1) + self.fc_x_1(x)) )
+            u = self.ln_u( torch.relu(self.fc_l_1(l_1) + self.fc_x_1(x)) )
 
         del l_1, x, x_a, x_b
         # Second convolution of graphs
         for t in range(self.T2):
             #embedding_dist_2 = self.ln_embedding_2( torch.tanh(self.fc_embedding_2(edge_dist)) )# (n_batch, n_nodes, n_cities, self.base_hidden_size)
-            embedding_dist_2 = self.fc_embedding_2(edge_dist)# (n_batch, n_nodes, n_cities, self.base_hidden_size)
-            embedding_dist_2 = gamma[:, :-1, :].unsqueeze(1) + embedding_dist_2 # (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_2 = torch.tanh( self.fc_embedding_2(edge_dist) )# (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_2 = gamma[:, :-1, :].unsqueeze(1) * embedding_dist_2 # (n_batch, n_nodes, n_cities, self.base_hidden_size)
 
             l_2 = torch.matmul(presence_in, embedding_dist_2) # (n_batch, n_nodes, 1, self.base_hidden_size)
             l_2 = l_2.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size
             #l_2 = torch.matmul(presence_in, gamma[:, :-1, :])
-            gamma = gamma + self.ln_gamma(torch.relu(self.fc_l_2(l_2) + self.fc_x_2(u)) ) # (n_batch, n_nodes, self.base_hidden_size)
+            gamma = self.ln_gamma( torch.relu(self.fc_l_2(l_2) + self.fc_x_2(u)) ) # (n_batch, n_nodes, self.base_hidden_size)
         del u, l_2
 
         sum_gamma_remained = torch.sum(gamma * avail_node_presence.transpose(-2, -1), dim=-2) # (n_batch, self.base_hidden_size)
