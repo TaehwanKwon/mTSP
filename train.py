@@ -101,7 +101,7 @@ def train(args, config, model, agent):
                 )
             _time_10_step = time.time()
 
-        if step_train % 25 == 0:
+        if step_train % 10 == 0:
             # adding new data to replay buffer
             model.simulator.save_to_replay_buffer(config['learning']['size_batch'])
             
