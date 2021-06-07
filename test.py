@@ -24,6 +24,7 @@ from datetime import datetime
 import argparse
 
 def test(config, model):
+    now = datetime.now()
     config_env = config['env_test'] if 'env_test' in config else config['env']
 
     env = MTSP(config_env)
