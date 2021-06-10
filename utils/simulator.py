@@ -64,14 +64,13 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
             if flag_models[idx]:
                 flag_models[idx] = False
                 q_flag_models.put(flag_models)
-            
                 state_dict_cpu = q_model.get()
                 q_model.put(state_dict_cpu)
                 state_dict_gpu = {key: state_dict_cpu[key].to(device) for key in state_dict_cpu}
                 model.load_state_dict(state_dict_gpu)
             else:
                 q_flag_models.put(flag_models)
-            
+
             num_data = 0
             num_remaining_data = len(rollout['sards'])
             while num_data < _num_collection - num_remaining_data:
@@ -218,7 +217,6 @@ class Simulator:
         return state_dict
 
     def save_to_replay_buffer(self, size):
-        print("getting data..")
         num_data = size
         eps = self.get_eps()
         state_dict_cpu = self.get_state_dict_cpu()
@@ -242,7 +240,8 @@ class Simulator:
             else:
                 time.sleep(1e-3)
         self.q_eps.get()
-        print("got data!!")
+        self.q_model.get()
+        self.q_flag_models.get()
 
     def terminate(self):
         for proc in self.procs:
