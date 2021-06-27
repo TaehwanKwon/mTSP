@@ -25,7 +25,7 @@ class Model(M):
         -----------------------------------------------
         '''
         assignment = state['assignment_prev'] + action # (n_batch, n_robots, n_nodes)
-        x_a = torch.sum(state['x_a'] * assignment.unsqueeze(-1), dim=1) # (n_batch, n_nodes, 3)
+        x_a = torch.sum(state['x_a'] * assignment.unsqueeze(-1), dim=1) # (n_batch, n_nodes, d)
         x_b = state['x_b'] # (n_batch, n_nodes, 1)
         coord = state['coord'] # (n_batch, n_nodes, 2)
         edge = state['edge'] # (n_batch, n_cities, n_nodes, 3)
@@ -61,7 +61,8 @@ class Model(M):
             presence_out = mask_drawed_presence_out * presence_prev + (1 - mask_drawed_presence_out) * presence_out
         
         presence_in = presence_out.transpose(1, 2).unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
-        edge_dist = edge[:, :, :, 0:1].transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
+        #edge_dist = edge[:, :, :, 0:1].transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
+        edge_dist = edge.transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
 
         # First convolution of graphs
         for t in range(self.T1):

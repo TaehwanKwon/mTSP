@@ -5,7 +5,7 @@ sys.path.append(os.path.abspath( os.path.join(os.path.dirname(__file__), "..")))
 config = {
     'env':{
         'name':'MTSP',
-        'num_robots': 2,
+        'num_robots': 4,
         'num_cities': 51,
         'file': 'berlin52.txt',
         'scale_distance': 1e-3,
@@ -38,6 +38,6 @@ config = {
         'size_batch': 64,
         'size_replay_buffer': 10000,
         'num_rollout':1,
-        'num_processes': 1,
+        'num_processes': 2,
     }
 }

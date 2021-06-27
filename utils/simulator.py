@@ -42,6 +42,7 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
         'state': list(),
         'action': list(),
         'reward': list(),
+        'done': list(),
         'sards':list(),
     }
 
@@ -73,38 +74,64 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
 
             num_data = 0
             num_remaining_data = len(rollout['sards'])
-            while num_data < _num_collection - num_remaining_data:
+            done = (num_remaining_data >= _num_collection) # initiall check whether do we have to collect or not
+            _rollout = dict(state=list(), action=list(), reward=list())
+            while num_data < _num_collection - num_remaining_data or not done:
                 _time_test = time.time()
                 if np.random.rand() < eps:
                     #action = model.action(s, softmax=True)
                     action = model.random_action(s)
                 else:
                     action = model.action(s, softmax=False)
-                time_test = time.time() - _time_test
-                #print(f"time_test: {time_test}")
+                #print(f"time_test: {time.time() - _time_test}")
                 s_next, reward, done = env.step(action['list'])
                 
                 rollout['state'].append(s)
                 rollout['action'].append(action['numpy'])
                 rollout['reward'].append(reward)
+                rollout['done'].append(done)
                 
-                if not done and len(rollout['state'])==config['learning']['num_rollout']:
-                    sards = (rollout['state'][0], rollout['action'][0], sum(rollout['reward']), done, s_next)
-                    rollout['state'].pop(0)
-                    rollout['action'].pop(0)
-                    rollout['reward'].pop(0)
-                    rollout['sards'].append(sards)
-                    num_data += 1
-                elif done:
-                    for i in range(config['learning']['num_rollout']):
-                        sards = (rollout['state'][0], rollout['action'][0], sum(rollout['reward']), done, s_next)
-                        rollout['state'].pop(0)
-                        rollout['action'].pop(0)
-                        rollout['reward'].pop(0)
+                # if not done and len(rollout['state'])==config['learning']['num_rollout']:
+                #     sards = (rollout['state'][0], rollout['action'][0], sum(rollout['reward']), done, s_next)
+                #     rollout['state'].pop(0)
+                #     rollout['action'].pop(0)
+                #     rollout['reward'].pop(0)
+                #     rollout['sards'].append(sards)
+                #     num_data += 1
+                # elif done:
+                #     for i in range(config['learning']['num_rollout']):
+                #         sards = (rollout['state'][0], rollout['action'][0], sum(rollout['reward']), done, s_next)
+                #         rollout['state'].pop(0)
+                #         rollout['action'].pop(0)
+                #         rollout['reward'].pop(0)
+                #         rollout['sards'].append(sards)
+                #         num_data += 1
+
+                #     assert len(rollout['state'])==0, f"the length of left state should be zero, currently {len(rollout['state'])}"
+
+                if done:
+                    assert not s_next['state_final'] is None, "if game is done, state final shold exist"
+                    rollout['state'].append(s_next)
+                    for i in range(len(rollout['state']) - 1):
+                        _s, _a, _r, _done, _s_next = (
+                            rollout['state'][i], 
+                            rollout['action'][i], 
+                            rollout['reward'][i], 
+                            rollout['done'][i],
+                            rollout['state'][i + 1],
+                            )
+                        _s_next['state_final'] = s_next['state_final']
+                        sards = (_s, _a, _r, _done, _s_next)
                         rollout['sards'].append(sards)
                         num_data += 1
-
-                    assert len(rollout['state'])==0, f"the length of left state should be zero, currently {len(rollout['state'])}"
+                    
+                    for _ in range(10):
+                        rollout['sards'].append(sards)
+                        
+                    rollout['state'].clear()
+                    rollout['action'].clear()
+                    rollout['reward'].clear()
+                    rollout['done'].clear()
 
                 if done:
                     s = env.reset()

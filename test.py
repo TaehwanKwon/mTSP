@@ -32,10 +32,13 @@ def test(config, model):
     done = False
     score = 0
     step = 0
+    Q_pred = 0
     while not done:
         action = model.action(s, softmax=False)
         #if score !=0: print(f"p_max: {model.p.max():.3f}, p_min: {model.p.min():.3f}")
         s_next, reward, done = env.step(action['list'])
+        if step == 0:
+            Q_pred = action['Q']
         s = s_next
         score += reward
         step += 1
@@ -50,7 +53,7 @@ def test(config, model):
     os.makedirs(path_test, exist_ok=True)
     env.draw(path=path_test + f"/location_history-{name_test}_{config['env']['num_robots']}.png")
 
-    return sum(costs), max(costs), amplitude
+    return sum(costs), max(costs), amplitude, score, Q_pred
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description='train_mtsp')
@@ -68,12 +71,13 @@ if __name__=='__main__':
     state_dict = torch.load(path_model)
     model.load_state_dict(state_dict)
 
-    total_cost, max_cost, amplitude = test(config, model)
+    total_cost, max_cost, amplitude, score, Q_pred = test(config, model)
     
     logger.info(
         f"total_cost: {total_cost}\n"
         + f"max_cost: {max_cost}\n"
         + f"amplitude: {amplitude}"
+        + f"Q_pred: {Q_pred}"
         )
 
     

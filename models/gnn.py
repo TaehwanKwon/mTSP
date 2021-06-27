@@ -64,15 +64,15 @@ class Model(nn.Module):
         self.T2 = 4
 
         # Used for estimating presence probabilities
-        self.fc1_presence = nn.Linear(3, self.base_hidden_size, bias=self.bias)
+        self.fc1_presence = nn.Linear(4, self.base_hidden_size, bias=self.bias)
         self.fc2_presence = nn.Linear(self.base_hidden_size, 1, bias=self.bias)
 
-        self.fc_x_1 = nn.Linear(7, self.base_hidden_size, bias=self.bias)
-        self.fc_embedding_1 = nn.Linear(1, self.base_hidden_size, bias=self.bias)
+        self.fc_x_1 = nn.Linear(7 + self.config['env']['num_robots'], self.base_hidden_size, bias=self.bias)
+        self.fc_embedding_1 = nn.Linear(4, self.base_hidden_size, bias=self.bias)
         self.fc_l_1 = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
 
         self.fc_x_2 = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
-        self.fc_embedding_2 = nn.Linear(1, self.base_hidden_size, bias=self.bias)
+        self.fc_embedding_2 = nn.Linear(4, self.base_hidden_size, bias=self.bias)
         self.fc_l_2 = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
 
         self.fc_Q = nn.Linear(2 * self.base_hidden_size, 1)
@@ -84,6 +84,23 @@ class Model(nn.Module):
 
         self.extra_gpus = extra_gpus
         self.simulator = Simulator(config, self)
+
+        self.keys = {
+            'state': ['assignment_prev', 'presence_prev', 'x_a', 'x_b', 'coord', 'edge', 'avail_node_presence'],
+            'action': list(), 
+            'reward': list(), 
+            'done': list(),
+        }
+
+    def reset_target(self):
+        self.state_dict_target = self.state_dict()
+
+    def load_target(self):
+        self.state_dict_current = self.state_dict()
+        self.load_state_dict(self.state_dict_target)
+
+    def load_current(self):
+        self.load_state_dict(self.state_dict_current)
 
     def set_extra_gpus(self):
         self.model_list = [self]
@@ -113,7 +130,7 @@ class Model(nn.Module):
         -----------------------------------------------
         '''
         assignment = state['assignment_prev'] + action # (n_batch, n_robots, n_nodes)
-        x_a = torch.sum(state['x_a'] * assignment.unsqueeze(-1), dim=1) # (n_batch, n_nodes, 3)
+        x_a = torch.sum(state['x_a'] * assignment.unsqueeze(-1), dim=1) # (n_batch, n_nodes, d)
         x_b = state['x_b'] # (n_batch, n_nodes, 1)
         coord = state['coord'] # (n_batch, n_nodes, 2)
         edge = state['edge'] # (n_batch, n_cities, n_nodes, 3)
@@ -155,7 +172,8 @@ class Model(nn.Module):
         
         presence_in = presence_out.transpose(1, 2).unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
 
-        edge_dist = edge[:, :, :, 0:1].transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
+        #edge_dist = edge[:, :, :, 0:1].transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
+        edge_dist = edge.transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
         #_presence_in = presence_in.unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
 
         # First convolution of graphs
@@ -239,13 +257,14 @@ class Model(nn.Module):
             check_multiple_available_robots
             and check_multiple_available_nodes
             ):
-            action_list = self._auction(state, softmax=softmax)
+            action_list, Q = self._auction(state, softmax=softmax)
         elif check_multiple_available_nodes: # multiple nodes, one robot
-            action_list = self._argmax_action(state, softmax=softmax)
+            action_list, Q = self._argmax_action(state, softmax=softmax)
         else: # only one node (base), should go base
             action_list = [ None for _ in range(self.config['env']['num_robots']) ]
             for idx_robot in idx_avail_robots:
                 action_list[idx_robot] = self.config['env']['num_cities'] # go_base
+            Q = 0
 
         action_numpy = self._convert_list_action_to_numpy(action_list)
 
@@ -254,6 +273,7 @@ class Model(nn.Module):
         return {
             'list': action_list,
             'numpy': action_numpy,
+            'Q': Q,
         }
 
     # random action used for epsilon-greedy
@@ -279,7 +299,6 @@ class Model(nn.Module):
             for chosen_node in chosen_nodes:
                 if not chosen_node == self.config['env']['num_cities'] and chosen_node in idx_avail_nodes:
                     idx_avail_nodes.remove(chosen_node)
-
             idx_node = random.sample(idx_avail_nodes, 1)[0]
             action_list[idx_robot] = int(idx_node)
             self._remove_node(idx_avail_nodes, idx_node)
@@ -302,7 +321,8 @@ class Model(nn.Module):
         elif is_sarsa:
             state_tuple, action_tuple, reward_tuple, done_tuple, state_next_tuple, action_next_tuple = zip(*batch)
         
-        self.sync_models()
+        #self.sync_models()
+        self.load_target()
 
         assert len(state_next_tuple) % self.config['learning']['num_processes'] == 0, 'Currently we only support batch size proportional to number of total gpus'
         m = len(state_next_tuple) // self.config['learning']['num_processes']
@@ -351,8 +371,10 @@ class Model(nn.Module):
 
     def get_processed_batch(self):
         batch = self._get_batch()
-        Q = self.get_Q_from_tensor_action(batch['state'], batch['action'])
         Q_next_max = self.get_Q_from_tensor_action(batch['state_next'], batch['argmax_action']).detach() # We do not generate gradient from target Q value
+
+        self.load_current()
+        Q = self.get_Q_from_tensor_action(batch['state'], batch['action'])
 
         processed_batch = dict()
         processed_batch['Q'] = Q
@@ -379,7 +401,7 @@ class Model(nn.Module):
                     self.config['learning']['size_batch'], 
                     self.config['env']['num_robots'],
                     self.config['env']['num_cities'] + 1,
-                    3
+                    3 + self.config['env']['num_robots']
                     ),
                 'x_b': (
                     self.config['learning']['size_batch'], 
@@ -395,7 +417,7 @@ class Model(nn.Module):
                     self.config['learning']['size_batch'], 
                     self.config['env']['num_cities'], # no '+1' since there is no edge going out from the base
                     self.config['env']['num_cities'] + 1, 
-                    3
+                    4
                     ),
                 'avail_node_presence': (
                     self.config['learning']['size_batch'], 
@@ -504,7 +526,9 @@ class Model(nn.Module):
 
             auction_result[argmax_robot] = argmax_node
 
-        return auction_result
+        Q = optimal_Qs.max()
+
+        return auction_result, Q
 
     # Argmax action when there is only one available robot
     def _argmax_action(self, state, softmax=False):
@@ -520,7 +544,7 @@ class Model(nn.Module):
         _state = {
             key: np.tile(state[key], [len(idx_avail_nodes), 1, 1]) if len(state[key].shape)==3
             else np.tile(state[key], [len(idx_avail_nodes), 1, 1, 1])
-            for key in state
+            for key in self.keys['state']
             }
 
         action_numpy = np.zeros([
@@ -550,8 +574,9 @@ class Model(nn.Module):
         #logger.debug(f"idx_avail_nodes: {idx_avail_nodes}")
 
         action_list[idx_robot] = int(argmax_node)
+        Q = Q_avail_nodes_of_a_robot.max()
 
-        return action_list
+        return action_list, Q
 
     def _remove_node(self, idx_nodes, idx_node):
         if not idx_node == self.config['env']['num_cities']:
@@ -591,16 +616,3 @@ class Model(nn.Module):
                 action_numpy[0, idx, int(_action)] = 1
 
         return action_numpy
-
-
-
-
-
-
-
-
-
-
-
-
-

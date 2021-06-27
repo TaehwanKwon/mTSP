@@ -18,7 +18,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from pprint import pprint
-
+from adjustText import adjust_text
 
 class Robot:
     def __init__(self, robot_id, x, y, speed):
@@ -183,7 +183,9 @@ class MTSP(Env):
         state = self.get_numpy_state()
         return state
 
-    def draw(self, path=None):
+    def draw(self, path=None, pred=None):
+        alpha = 0.5
+
         plt.cla()
         plt.xlim(-0.25 * self.config['x_max'], self.config['x_max'] + 0.25 * self.config['x_max'])
         plt.ylim(-0.25 * self.config['y_max'], self.config['y_max'] + 0.25 * self.config['y_max'])
@@ -207,15 +209,35 @@ class MTSP(Env):
             for i in range(len(robot.location_history) - 1):
                 city1 = robot.location_history[i]
                 city2 = robot.location_history[i+1]
-                plt.plot([city1.x, city2.x], [city1.y, city2.y], color=color)
+                plt.plot([city1.x, city2.x], [city1.y, city2.y], color=color, alpha=alpha)
 
             if len(robot.location_history) > 0:
                 city1 = robot.location_history[0]
-                plt.plot([self.base.x, city1.x], [self.base.y, city1.y], color=color)
+                plt.plot([self.base.x, city1.x], [self.base.y, city1.y], color=color, alpha=alpha)
                 city2 = robot.location_history[-1]
-                plt.plot([city2.x, robot.x], [city2.y, robot.y], color=color)
+                plt.plot([city2.x, robot.x], [city2.y, robot.y], color=color, alpha=alpha)
             else:
-                plt.plot([self.base.x, robot.x], [self.base.y, robot.y], color=color)
+                plt.plot([self.base.x, robot.x], [self.base.y, robot.y], color=color, alpha=alpha)
+
+        if not pred is None:
+            pred = pred[0] # (n_nodes, n_robots)
+            np.set_printoptions(precision=2)
+            texts = []
+            for idx_city, city in enumerate(self.cities):
+                text = ""
+                idx_robot = self.robots.index(city.visited_robot)
+                color = self.robot_color_list[idx_robot]
+                for idx_robot in range(len(self.robots)):
+                    text += f"{pred[idx_city][idx_robot]:.2f} \n"
+
+                text = plt.text(
+                    city.x, city.y,
+                    text, 
+                    fontsize = 7.5,
+                    color = color
+                    )
+                texts.append(text)
+            adjust_text(texts, arrowprops=dict(arrowstyle="->", color='black', lw=1.5))
 
         plt.legend(bbox_to_anchor=(0.5, 0.025, 0.5, 0.5), loc=1, borderaxespad=0., fontsize=10, framealpha=0.4)
         if not path is None:
@@ -280,14 +302,15 @@ class MTSP(Env):
         scale_dist = 0.05
         scale_coord = 0.1
 
-        state['x_a'] = np.zeros([1, len(self.robots), len(self.cities) + 1, 3])
-        # (n_batch, n_robot, n_nodes), assignments to nodes, for base node, only d_max is considered
+        state['x_a'] = np.zeros([1, len(self.robots), len(self.cities) + 1, len(self.robots) + 3])
+        # (n_batch, n_robot, n_nodes, d), assignments to nodes, for base node, only d_max is considered
         state['x_b'] = np.zeros([1, len(self.cities) + 1, 1])
         # (n_batch, 1, n_nodes), distance to base of each nodes, for base node, 0 is constant input
         state['coord'] = np.zeros([1, len(self.cities) + 1, 2])
         # (n_batch, 1, n_nodes), distance to base of each nodes, for base node, 0 is constant input
-        state['edge'] = np.zeros([1, len(self.cities), len(self.cities) + 1, 3]) 
+        state['edge'] = np.zeros([1, len(self.cities), len(self.cities) + 1, 4]) 
         # (n_batch, n_cities, n_nodes, 3), distance to node, distance to base, is_targeting_base
+        # -> relative pos from node, distance to node, is_targeting_base
         state['avail_node_presence'] = np.zeros([1, 1, len(self.cities) + 1])
         # (n_batch, 1, n_nodes) presence availability of each node, it is 0 once it is visited for city
         state['avail_node_action'] = np.zeros([1, len(self.robots), len(self.cities) + 1])
@@ -308,14 +331,30 @@ class MTSP(Env):
             state['avail_node_presence'][0, 0, idx_city] = float(not city.is_visited)
             state['coord'][0, idx_city, :] = np.array([city.x, city.y])
 
+            # # (distance to node, distance to base, is_targeting_base)
+            # for _idx_city, _city in enumerate(self.cities):
+            #     state['edge'][0, idx_city, _idx_city, :] = np.array([
+            #         city.distance(_city), 
+            #         city.distance(self.base), 
+            #         0
+            #         ])
+            # state['edge'][0, idx_city, -1, :] = np.array([
+            #     city.distance(self.base), 
+            #     city.distance(self.base), 
+            #     1
+            #     ])
+
+            # (relative pos from node, distance to node, is_targeting_base)
             for _idx_city, _city in enumerate(self.cities):
                 state['edge'][0, idx_city, _idx_city, :] = np.array([
+                    city.x - _city.x,
+                    city.y - _city.y,
                     city.distance(_city), 
-                    city.distance(self.base), 
                     0
                     ])
             state['edge'][0, idx_city, -1, :] = np.array([
-                city.distance(self.base), 
+                city.x - self.base.x,
+                city.y - self.base.y,
                 city.distance(self.base), 
                 1
                 ])
@@ -336,7 +375,11 @@ class MTSP(Env):
         
         state['x_b'] = scale_dist * state['x_b'] / std_dist
         state['coord'] = scale_coord * (state['coord'] - avg_coord) / std_coord
-        state['edge'][0,:,:,0:2] = scale_dist * state['edge'][0,:,:,0:2] / std_dist
+        # # (distance to node, distance to base, is_targeting_base)
+        # state['edge'][0,:,:,0:2] = scale_dist * state['edge'][0,:,:,0:2] / std_dist
+        # (relative pos from node, distance to node, is_targeting_base)
+        state['edge'][0,:,:,0:2] = scale_coord * state['edge'][0,:,:,0:2] / std_coord
+        state['edge'][0,:,:,2] = scale_dist * state['edge'][0,:,:,2] / std_dist
 
         is_all_assignment_none_or_base = []
         for idx_robot, robot in enumerate(self.robots):
@@ -350,11 +393,13 @@ class MTSP(Env):
                         state['presence_prev'][0, city1.id, -1] = 1
 
             for idx_city, city in enumerate(self.cities):
-                state['x_a'][0, idx_robot, idx_city, 0] = scale_dist * robot.distance(city) / std_dist
-                state['x_a'][0, idx_robot, idx_city, 1:] = scale_coord * np.array([robot.x - city.x, robot.y - city.y]) / std_coord
+                state['x_a'][0, idx_robot, idx_city, self.robots.index(robot)] = 1.0
+                state['x_a'][0, idx_robot, idx_city, len(self.robots)] = scale_dist * robot.distance(city) / std_dist
+                state['x_a'][0, idx_robot, idx_city, len(self.robots) + 1:] = scale_coord * np.array([robot.x - city.x, robot.y - city.y]) / std_coord
                 state['avail_node_action'][0, idx_robot, idx_city] = float(city.is_available())
-            state['x_a'][0, idx_robot, -1, 0] = scale_dist * robot.distance(self.base) / std_dist
-            state['x_a'][0, idx_robot, -1, 1:] = scale_coord * np.array([robot.x - self.base.x, robot.y - self.base.y]) / std_coord
+            state['x_a'][0, idx_robot, idx_city, self.robots.index(robot)] = 1.0
+            state['x_a'][0, idx_robot, -1, len(self.robots)] = scale_dist * robot.distance(self.base) / std_dist
+            state['x_a'][0, idx_robot, -1, len(self.robots) + 1:] = scale_coord * np.array([robot.x - self.base.x, robot.y - self.base.y]) / std_coord
             
             if not robot.assigned_city is None:
                 if type(robot.assigned_city) == Base:
@@ -369,14 +414,14 @@ class MTSP(Env):
             state['avail_robot'][0, 0, idx_robot] = float(not (robot.is_assigned or robot.is_returned_to_base))
 
         dist_sorted = np.sort(
-            state['avail_node_action'][0, :, :-1] * state['x_a'][0, :, :-1, 0]
-            + (1 - state['avail_node_action'][0, :, :-1]) * np.max(state['x_a'][0, :, :-1, 0] + 10)
+            state['avail_node_action'][0, :, :-1] * state['x_a'][0, :, :-1, len(self.robots)]
+            + (1 - state['avail_node_action'][0, :, :-1]) * np.max(state['x_a'][0, :, :-1, len(self.robots)] + 10)
             , axis=1
             )
         
         n_remaining_cities = np.sum(state['avail_node_action'][0, 0, :-1])
         dist_threshold_closest = dist_sorted[:, n_close].reshape(-1, 1)
-        is_in_threshold = state['x_a'][0, :, :-1, 0] < dist_threshold_closest
+        is_in_threshold = state['x_a'][0, :, :-1, len(self.robots)] < dist_threshold_closest
         state['avail_node_action'][0, :, :-1] = is_in_threshold * state['avail_node_action'][0, :, :-1]
 
         is_all_assignment_none_or_base = np.array(is_all_assignment_none_or_base).all()
@@ -387,6 +432,19 @@ class MTSP(Env):
             state['avail_node_action'][0, :, -1] = 1
 
         return state
+
+    def get_state_final(self, done):
+        if not done:
+            return None
+
+        state_final = np.zeros([1, len(self.cities) + 1, len(self.robots)])
+        for idx_city, city in enumerate(self.cities):
+            assert not city.visited_robot is None, f"done: {done} if game is done, every city should be visited by some robot"
+            idx_robot = self.robots.index(city.visited_robot)
+            state_final[:, idx_city, idx_robot] = 1.0
+        state_final[:, -1, :] = 1.0 / len(self.robots)
+
+        return state_final
                 
     def step(self, action):
         # action is defined as target city of each robot
@@ -416,6 +474,8 @@ class MTSP(Env):
                     )
         time_spent, done = self.update_robots()
         state_next = self.get_numpy_state()
+        state_final = self.get_state_final(done)
+        state_next['state_final'] = state_final
         
         reward = - self.config['scale_reward'] * time_spent / self.std_dist
 
