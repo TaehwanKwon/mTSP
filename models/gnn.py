@@ -58,7 +58,7 @@ class Model(nn.Module):
         self.tau = 2.
         self.base_hidden_size = 128
         self.bias = False
-        self.sigma = 1e-3
+        self.sigma = 0e-3
 
         self.T1 = 4
         self.T2 = 4
