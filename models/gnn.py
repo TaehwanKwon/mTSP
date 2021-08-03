@@ -37,6 +37,7 @@ class ReplayBuffer:
         # ('state, action, reward, state_next, done')
         if len(self.buffer) == self.size:
             self.buffer.pop(0)
+        
         self.buffer.append(data)
 
     def sample(self):
@@ -55,27 +56,32 @@ class Model(nn.Module):
     def __init__(self, config, device='cpu', extra_gpus=None):
         super().__init__()
         self.config = config
-        self.tau = 2.
+        self.tau = 1.
         self.base_hidden_size = 128
-        self.bias = False
+        self.bias = True
         self.sigma = 0e-3
+        self.dim_edge = 5
 
         self.T1 = 4
         self.T2 = 4
 
         # Used for estimating presence probabilities
-        self.fc1_presence = nn.Linear(4, self.base_hidden_size, bias=self.bias)
+        self.fc1_presence = nn.Linear(
+            self.dim_edge + 2 * (3 + self.config['env']['num_robots']), 
+            self.base_hidden_size, 
+            bias=self.bias
+            )
         self.fc2_presence = nn.Linear(self.base_hidden_size, 1, bias=self.bias)
 
-        self.fc_x_1 = nn.Linear(7 + self.config['env']['num_robots'], self.base_hidden_size, bias=self.bias)
-        self.fc_embedding_1 = nn.Linear(4, self.base_hidden_size, bias=self.bias)
+        self.fc_x_1 = nn.Linear(8 + self.config['env']['num_robots'], self.base_hidden_size, bias=self.bias)
+        self.fc_embedding_1 = nn.Linear(self.dim_edge, self.base_hidden_size, bias=self.bias)
         self.fc_l_1 = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
 
         self.fc_x_2 = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
-        self.fc_embedding_2 = nn.Linear(4, self.base_hidden_size, bias=self.bias)
+        self.fc_embedding_2 = nn.Linear(self.dim_edge, self.base_hidden_size, bias=self.bias)
         self.fc_l_2 = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
 
-        self.fc_Q = nn.Linear(2 * self.base_hidden_size, 1)
+        self.fc_Q = nn.Linear(self.base_hidden_size, 1, bias=False)
 
         self.replay_buffer = ReplayBuffer(config)
         self.device = device
@@ -86,11 +92,21 @@ class Model(nn.Module):
         self.simulator = Simulator(config, self)
 
         self.keys = {
-            'state': ['assignment_prev', 'presence_prev', 'x_a', 'x_b', 'coord', 'edge', 'avail_node_presence'],
+            'state': [
+                'assignment_prev', 
+                #'presence_prev', 
+                'x_a', 
+                'x_b', 
+                'coord', 
+                'edge', 
+                'avail_node_presence'
+                ],
             'action': list(), 
             'reward': list(), 
             'done': list(),
         }
+        self.show_presence = False
+        self.activation = torch.relu
 
     def reset_target(self):
         self.state_dict_target = self.state_dict()
@@ -150,19 +166,38 @@ class Model(nn.Module):
         n_cities = edge.shape[1]
         n_nodes = edge.shape[2]
 
-        x = torch.cat([x_a, x_b, coord, avail_node_presence.transpose(-2,-1)], dim=-1) # (n_batch, n_nodes, 3)
+        x = torch.cat(
+            [
+                #x_a[:, :, self.config['env']['num_robots']:self.config['env']['num_robots'] + 1], 
+                x_a, 
+                x_b, 
+                coord, 
+                avail_node_presence.transpose(-2,-1)
+                ],
+             dim=-1
+             ) # (n_batch, n_nodes, 3)
+        
         u = self.sigma * torch.randn(n_batch, n_nodes, self.base_hidden_size).to(self.device)
         gamma = self.sigma * torch.randn(n_batch, n_nodes, self.base_hidden_size).to(self.device)
 
-        h1_presence = torch.relu(self.fc1_presence(edge))
-        h2_presence = torch.relu(self.fc2_presence(h1_presence)).squeeze(-1) # (n_batch, n_cities, n_nodes)
+        h0_presence = torch.cat(
+            [
+            edge, 
+            x_a[:, :-1, :].unsqueeze(-2).repeat(1, 1, n_nodes, 1), 
+            x_a.unsqueeze(-3).repeat(1, n_cities, 1, 1)
+            ],
+            dim = -1
+            )
+        h1_presence = self.activation(self.fc1_presence(h0_presence))
+        h2_presence = self.fc2_presence(h1_presence).squeeze(-1) # (n_batch, n_cities, n_nodes)
         h2_presence = h2_presence / self.tau
         mask_presence = 1 - torch.eye(n_cities, n_nodes).unsqueeze(0).repeat(n_batch, 1, 1).to(self.device) # eleminate self-feeding presence
         mask_presence = mask_presence * avail_node_presence 
+        mask_presence[:, :, -1] = 0.0 # mask out base node when calculating presence_out
         logit_presence = h2_presence * mask_presence - (1 - mask_presence) * 1e10
         presence_out = torch.softmax(logit_presence, dim = -1)  # (n_batch, n_cities, n_nodes)
         
-        # handling visited nodes
+        # # handling visited nodes
         if not 'presence_prev' in self.config['learning'] or not self.config['learning']['presence_prev']:
             presence_out = avail_node_presence[:, :, :-1].transpose(-2, -1) * presence_out # masking presence out from visited nodes
         else:
@@ -170,10 +205,11 @@ class Model(nn.Module):
             mask_drawed_presence_out = mask_drawed_presence_out.float().unsqueeze(-1)
             presence_out = mask_drawed_presence_out * presence_prev + (1 - mask_drawed_presence_out) * presence_out
         
-        presence_in = presence_out.transpose(1, 2).unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
+        if self.show_presence:
+            print(f"presnce_out: {presence_out[0].max(dim=-1)}")
 
-        #edge_dist = edge[:, :, :, 0:1].transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
-        edge_dist = edge.transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
+        presence_in = presence_out.transpose(1, 2).unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
+        edge_dist = edge[:, :, :, 0:self.dim_edge].transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
         #_presence_in = presence_in.unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
 
         # First convolution of graphs
@@ -185,7 +221,7 @@ class Model(nn.Module):
             l_1 = torch.matmul(presence_in, embedding_dist_1) # (n_batch, n_nodes, 1, self.base_hidden_size)
             l_1 = l_1.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size)
             #l_a = torch.matmul(presence_in, u_a[:, :-1, :])
-            u = torch.relu(self.fc_l_1(l_1) + self.fc_x_1(x) )
+            u = self.activation(self.fc_l_1(l_1) + self.fc_x_1(x) )
 
         del l_1, x, x_a, x_b
         # Second convolution of graphs
@@ -196,13 +232,14 @@ class Model(nn.Module):
             l_2 = torch.matmul(presence_in, embedding_dist_2) # (n_batch, n_nodes, 1, self.base_hidden_size)
             l_2 = l_2.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size)
             #l_2 = torch.matmul(presence_in, gamma[:, :-1, :])
-            gamma = torch.relu(self.fc_l_2(l_2) + self.fc_x_2(u)) # (n_batch, n_nodes, self.base_hidden_size)
+            gamma = self.activation(self.fc_l_2(l_2) + self.fc_x_2(u)) # (n_batch, n_nodes, self.base_hidden_size)
         del u, l_2
 
         sum_gamma_remained = torch.sum(gamma * avail_node_presence.transpose(-2, -1), dim=-2) # (n_batch, self.base_hidden_size)
         sum_gamma_done = torch.sum(gamma * (1 - avail_node_presence.transpose(-2, -1)), dim=-2) # (n_batch, self.base_hidden_size)
         cat_gamma = torch.cat([sum_gamma_remained, sum_gamma_done], dim=-1) # (n_batch, 2 * self.base_hidden_size)
-        Q = self.fc_Q(cat_gamma) # (n_batch, 1)
+        #Q = self.fc_Q(cat_gamma) # (n_batch, 1)
+        Q = self.fc_Q(sum_gamma_remained) # (n_batch, 1)
 
         return Q
 
@@ -406,7 +443,7 @@ class Model(nn.Module):
                 'x_b': (
                     self.config['learning']['size_batch'], 
                     self.config['env']['num_cities'] + 1,
-                    1
+                    2
                     ),
                 'coord': (
                     self.config['learning']['size_batch'], 
@@ -417,7 +454,7 @@ class Model(nn.Module):
                     self.config['learning']['size_batch'], 
                     self.config['env']['num_cities'], # no '+1' since there is no edge going out from the base
                     self.config['env']['num_cities'] + 1, 
-                    4
+                    5
                     ),
                 'avail_node_presence': (
                     self.config['learning']['size_batch'], 

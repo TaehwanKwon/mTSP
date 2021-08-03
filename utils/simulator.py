@@ -58,7 +58,7 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
                 _num_collection = num_collection
                 q_count.put(count)
             else:
-                _num_collection = count
+                _num_collection = int(count)
                 count = 0
 
             flag_models = q_flag_models.get()
@@ -125,8 +125,9 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
                         rollout['sards'].append(sards)
                         num_data += 1
                     
-                    for _ in range(10):
-                        rollout['sards'].append(sards)
+                    # for _ in range(10):
+                    #     rollout['sards'].append(sards)
+                    #     num_data += 1
                         
                     rollout['state'].clear()
                     rollout['action'].clear()
@@ -202,7 +203,7 @@ def get_data2(idx, config, q_data, q_count, q_eps, q_flag_models, q_model):
 class Simulator:
     def __init__(self, config, model):
         self.config = config
-        self.model = model # Should be sheard by model.shared_memory()
+        self.model = model #
 
     def start(self):
         self.q_data = mp.Queue()

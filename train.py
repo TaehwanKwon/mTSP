@@ -15,7 +15,7 @@ from utils.logger_tool import LoggerTool
 
 import torch
 import torch.multiprocessing as mp
-from torch.optim import Adam
+from torch.optim import Adam, AdamW
 torch.set_num_threads(1)
 
 import time
@@ -34,6 +34,10 @@ def test(config, model, step_train=0, path_log=None):
     step = 0
     Q_pred = 0
     while not done:
+        model.show_presence = False
+        if step==1:
+            model.show_presence = True
+
         action = model.action(s, softmax=False)
         #if score !=0: print(f"p_max: {model.p.max():.3f}, p_min: {model.p.min():.3f}")
         s_next, reward, done = env.step(action['list'])
@@ -55,13 +59,15 @@ def test(config, model, step_train=0, path_log=None):
         env.draw(path=path_log + f'/location_history_{step_train}.png', pred=pred)
 
     model.config['env'] = config['env'] # Rollback the configuration of environment
+    reward_avg = score / step
 
-    return sum(costs), max(costs), amplitude, score, Q_pred
+    return sum(costs), max(costs), amplitude, score, Q_pred, reward_avg
 
 def train(args, config, model, agent):
     now = datetime.now()
     path_log = f"logs/[{now.strftime('%y%m%d')}][{now.strftime('%H-%M-%S')}]"
     os.makedirs(path_log, exist_ok=True)
+    os.system(f"rsync -av --progress . {path_log}/ --exclude logs")
 
     path_prev = args.path_prev
     if path_prev:
@@ -71,18 +77,17 @@ def train(args, config, model, agent):
         f = open(f"{path_log}/comment.txt", 'w')
         f.write(path_prev)
         f.close()
-        os.system(f"rsync -av --progress . {path_log}/ --exclude logs")
 
     step_prev = args.step_prev
     model.step_train = step_prev
     
-    optimizer = Adam(model.parameters(), lr=config['learning']['lr_start'])
+    optimizer = Adam(model.parameters(), lr=config['learning']['lr_start'], betas=(0.95, 0.999))
     logger_tool = LoggerTool(path_log)
 
     _time_10_step = time.time()
 
     model.simulator.start()
-    model.simulator.save_to_replay_buffer(config['learning']['size_replay_buffer'])
+    model.simulator.save_to_replay_buffer(0.5 * config['learning']['size_replay_buffer'])
     
     model.reset_target()
 
@@ -109,37 +114,39 @@ def train(args, config, model, agent):
             time_10_step = time.time() - _time_10_step
             print(
                 f"[{step_train}] lr: {optimizer.param_groups[0]['lr']:.5f} "
-                + f"loss_bellman: {info['loss_bellman']:.3f}, "
+                + f"sqrt_loss_bellman: {info['loss_bellman'] ** 0.5:.3f}, "
                 + f"loss_pred: {info['loss_cross_entropy']:.3f}, "
                 + f"time_10_step: {time_10_step:.2f} "
                 )
             _time_10_step = time.time()
 
-        if step_train % 25 == 0:
+        if step_train % 5 == 0:
             # adding new data to replay buffer
             model.simulator.save_to_replay_buffer(config['learning']['size_batch'])
             model.reset_target()
             
         if step_train % 100 == 0:
             # Test the performance of the training agent
-            total_cost, max_cost, amplitude, score, Q_pred = test(config, model, step_train=step_train, path_log=path_log)
+            total_cost, max_cost, amplitude, score, Q_pred, reward_avg = test(config, model, step_train=step_train, path_log=path_log)
             print(
                 f"toptal_cost: {total_cost} "
                 + f"max_cost: {max_cost} "
                 + f"amplitude: {amplitude} "
                 + f"score: {score} "
                 + f"Q_pred: {Q_pred} "
+                + f"r_avg: {reward_avg} "
                 )
             logger_tool.write(
                 step_train, 
                 {
-                    'loss_bellman': info['loss_bellman'],
+                    'sqrt_loss_bellman': info['loss_bellman'] ** 0.5,
                     'loss_pred': info['loss_cross_entropy'],
                     'training_time': time_train,
                     'total_cost': total_cost,
                     'max_cost': max_cost,
                     'amplitude': amplitude,
                     'score': score,
+                    'reward_avg': reward_avg,
                     'Q_pred': Q_pred,
                     }
                 )

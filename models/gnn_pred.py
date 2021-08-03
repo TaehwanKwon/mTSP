@@ -38,7 +38,15 @@ class Model(M):
         n_cities = edge.shape[1]
         n_nodes = edge.shape[2]
 
-        x = torch.cat([x_a, x_b, coord, avail_node_presence.transpose(-2,-1)], dim=-1) # (n_batch, n_nodes, 3)
+        x = torch.cat(
+            [
+                x_a, 
+                x_b, 
+                coord, 
+                avail_node_presence.transpose(-2,-1)
+                ],
+             dim=-1
+             ) # (n_batch, n_nodes, 3)
         u = self.sigma * torch.randn(n_batch, n_nodes, self.base_hidden_size).to(self.device)
         gamma = self.sigma * torch.randn(n_batch, n_nodes, self.base_hidden_size).to(self.device)
 
@@ -59,8 +67,7 @@ class Model(M):
             presence_out = mask_drawed_presence_out * presence_prev + (1 - mask_drawed_presence_out) * presence_out
         
         presence_in = presence_out.transpose(1, 2).unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
-        #edge_dist = edge[:, :, :, 0:1].transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
-        edge_dist = edge.transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
+        edge_dist = edge[:, :, :, 0:self.dim_edge].transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
 
         # First convolution of graphs
         for t in range(self.T1):
@@ -96,7 +103,7 @@ class Model(M):
         sum_gamma_remained = torch.sum(gamma * avail_node_presence.transpose(-2, -1), dim=-2) # (n_batch, self.base_hidden_size)
         sum_gamma_done = torch.sum(gamma * (1 - avail_node_presence.transpose(-2, -1)), dim=-2) # (n_batch, self.base_hidden_size)
         cat_gamma = torch.cat([sum_gamma_remained, sum_gamma_done], dim=-1) # (n_batch, 2 * self.base_hidden_size)
-        Q = self.fc_Q(cat_gamma) # (n_batch, 1)
+        Q = self.fc_Q(sum_gamma_remained) # (n_batch, 1)
 
         return Q, pred
 

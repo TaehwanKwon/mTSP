@@ -22,7 +22,7 @@ class Agent:
         Q_next_max = processed_batch['Q_next_max']
         Q_target = processed_batch['reward'] + self.config['gamma'] * (1 - processed_batch['done']) * Q_next_max
         
-        loss_bellman = F.smooth_l1_loss(Q_target, Q) - 1e-3 * torch.mean(Q)
+        loss_bellman = F.smooth_l1_loss(Q_target, Q)
         info['loss_bellman'] = loss_bellman.detach().cpu()
         loss = loss_bellman
 
@@ -30,7 +30,7 @@ class Agent:
             pred = processed_batch['pred']
             state_final = processed_batch['state_final']
             loss_cross_entropy = -torch.mean(state_final * torch.log(pred + 1e-10))
-            loss = loss + 1e-2 * loss_cross_entropy
+            loss = loss + 1e-3 * loss_cross_entropy
             info['loss_cross_entropy'] = loss_cross_entropy.detach().cpu()
         else:
             info['loss_cross_entropy'] = 0.
