@@ -11,6 +11,7 @@ sys.path.append(os.path.abspath( os.path.join(os.path.dirname(__file__), "..")))
 import time
 import copy
 import random
+import operator
 
 import numpy as np
 
@@ -27,18 +28,64 @@ from utils.simulator import Simulator
 class ReplayBuffer:
     def __init__(self, config):
         self.config = copy.deepcopy(config)
-        self.buffer = []
         self.size = self.config['learning']['size_replay_buffer']
+        self.alpha_score = 2.0
+        self.alpha_td = 2.0
+
+        self.buffer = list()
+        self.score_list = list()
+        self.td_list = list()
 
     def reset(self):
-        self.buffer = []
+        self.buffer = list()
+        self.score_list = list()
+        self.td_list = list()
 
-    def append(self, data):
+    def append(self, sards, score, td):
         # ('state, action, reward, state_next, done')
         if len(self.buffer) == self.size:
             self.buffer.pop(0)
+            self.score_list.pop(0)
+            self.td_list.pop(0)
         
-        self.buffer.append(data)
+        self.buffer.append(sards)
+        self.score_list.append(score)
+        self.td_list.append(td)
+
+    def _get_replay_prob(self):
+        score_array = np.array(self.score_list)
+        score_min, score_max = score_array.min(), score_array.max()
+        normalized_score_array = (score_array - score_min) / (score_max - score_min + 1e-3)
+        
+        td_array = np.abs(np.array(self.td_list))
+        td_array[td_array==0] = td_array.max()
+        td_min, td_max = td_array.min(), td_array.max()
+        normalized_td_array = (td_array - td_min) / (td_max - td_min + 1e-3)
+
+        exponent = np.exp(self.alpha_score * normalized_score_array + self.alpha_td * normalized_td_array)
+        p = exponent / np.sum(exponent)
+
+        return p
+
+    def _sample_uniform(self):
+        idx_sample_list = np.random.choice(
+            np.arange(len(self.buffer), dtype=np.int32), 
+            size=self.config['learning']['size_batch'], 
+            replace=False
+            ).tolist()
+        samples = operator.itemgetter(*idx_sample_list)(self.buffer)
+        return samples, idx_sample_list
+
+    def _sample_prioritized(self):
+        p = self._get_replay_prob()
+        idx_sample_list = np.random.choice(
+            np.arange(len(self.buffer), dtype=np.int32), 
+            size=self.config['learning']['size_batch'], 
+            replace=False,
+            p=p
+            ).tolist()
+        samples = operator.itemgetter(*idx_sample_list)(self.buffer)
+        return samples, idx_sample_list
 
     def sample(self):
         ''' 
@@ -50,7 +97,13 @@ class ReplayBuffer:
             f"Not enough data is collected for a batch size {self.config['learning']['size_batch']}, "
             + f"currently {len(self.buffer)}"
             )
-        return random.sample(self.buffer, self.config['learning']['size_batch'])
+        if self.config['learning']['sampling_method']=='uniform':
+            return self._sample_uniform()
+        elif self.config['learning']['sampling_method']=='prioritized':
+            return self._sample_prioritized()
+        else:
+            assert False, "Invalid sampling method in self.config['learning']"
+
 
 class Model(nn.Module):
     def __init__(self, config, device='cpu', extra_gpus=None):
@@ -350,7 +403,7 @@ class Model(nn.Module):
         }
 
     def _set_batch(self):
-        batch = self.replay_buffer.sample()
+        batch, idx_samples = self.replay_buffer.sample()
         is_optimal_q_learning = len(batch[0]) == 5
         is_sarsa = len(batch[0]) == 6
         if is_optimal_q_learning:
@@ -389,8 +442,10 @@ class Model(nn.Module):
                 self.batch['state_next'][key][idx] = state_next_tuple[idx][key][0]
             self.batch['argmax_action'][idx] = argmax_action_numpy_list[idx][0]
 
+        return idx_samples
+
     def _get_batch(self):
-        self._set_batch()
+        idx_sample_list = self._set_batch()
         batch = {
             'state': {
                 key: torch.from_numpy(self.batch['state'][key]).float().to(self.device) for key in self.batch['state']
@@ -404,14 +459,19 @@ class Model(nn.Module):
             'argmax_action': torch.from_numpy(self.batch['argmax_action']).float().to(self.device),
         }
 
-        return batch
+        return batch, idx_sample_list
 
     def get_processed_batch(self):
-        batch = self._get_batch()
+        batch, idx_sample_list = self._get_batch()
         Q_next_max = self.get_Q_from_tensor_action(batch['state_next'], batch['argmax_action']).detach() # We do not generate gradient from target Q value
 
         self.load_current()
         Q = self.get_Q_from_tensor_action(batch['state'], batch['action'])
+
+        td = batch['reward'] + self.config['learning']['gamma'] * (1 - batch['done']) * Q_next_max - Q
+        td = td.reshape(-1).detach().cpu().numpy()
+        for idx, idx_sample in enumerate(idx_sample_list):
+            self.replay_buffer.td_list[idx_sample] = td[idx]
 
         processed_batch = dict()
         processed_batch['Q'] = Q
@@ -488,9 +548,6 @@ class Model(nn.Module):
                 },
             'argmax_action': np.zeros([ *self.shapes['action'] ]),
             }
-
-    def add_to_replay_buffer(self, data):
-        self.replay_buffer.append(data)
 
     def _auction(self, state, softmax=False):
         auction_result = [ None for _ in range(self.config['env']['num_robots']) ]
