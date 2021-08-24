@@ -5,7 +5,7 @@ sys.path.append(os.path.abspath( os.path.join(os.path.dirname(__file__), "..")))
 config = {
     'env':{
         'name':'MTSP',
-        'num_robots': 3,
+        'num_robots': 2,
         'num_cities': 20,
         'file': 'berlin21.txt',
         'scale_distance': 1e-3,
@@ -13,7 +13,7 @@ config = {
     },
     'env_test':{
         'name':'MTSP',
-        'num_robots': 3,
+        'num_robots': 2,
         'num_cities': 20,
         'file': 'berlin21.txt',
         'scale_distance': 1e-3,
@@ -21,11 +21,12 @@ config = {
     },
     'learning':{
         'step': 500000,
-        'model': 'gnn_res',
+        'model': 'gnn',
         'algorithm': 'optimal_q_learning',
+        'sampling_method': 'prioritized',
         #'algorithm': 'sarsa',
-        'lr_start': 1e-5,
-        'lr_end': 1e-5,
+        'lr_start': 5e-5,
+        'lr_end': 5e-5,
         'lr_step': 500,
         'lr_decay': 0.99, 
         'eps': { # eps = eps_end + eps_add * half_life / (half_life + training_step)
