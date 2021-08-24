@@ -43,11 +43,12 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
         'action': list(),
         'reward': list(),
         'done': list(),
-        'sards':list(),
+        'sards_s':list(),
     }
 
     env = eval(f"{config['env']['name']}(config['env'])")
     s = env.reset()
+    score = 0.
     while True:
         if q_count.qsize() > 0:
             count = q_count.get()
@@ -73,7 +74,7 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
                 q_flag_models.put(flag_models)
 
             num_data = 0
-            num_remaining_data = len(rollout['sards'])
+            num_remaining_data = len(rollout['sards_s'])
             done = (num_remaining_data >= _num_collection) # initiall check whether do we have to collect or not
             _rollout = dict(state=list(), action=list(), reward=list())
             while num_data < _num_collection - num_remaining_data or not done:
@@ -85,6 +86,7 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
                     action = model.action(s, softmax=False)
                 #print(f"time_test: {time.time() - _time_test}")
                 s_next, reward, done = env.step(action['list'])
+                score += reward
                 
                 rollout['state'].append(s)
                 rollout['action'].append(action['numpy'])
@@ -110,7 +112,7 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
                 #     assert len(rollout['state'])==0, f"the length of left state should be zero, currently {len(rollout['state'])}"
 
                 if done:
-                    assert not s_next['state_final'] is None, "if game is done, state final shold exist"
+                    #assert not s_next['state_final'] is None, "if game is done, state final shold exist"
                     rollout['state'].append(s_next)
                     for i in range(len(rollout['state']) - 1):
                         _s, _a, _r, _done, _s_next = (
@@ -120,9 +122,12 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
                             rollout['done'][i],
                             rollout['state'][i + 1],
                             )
-                        _s_next['state_final'] = s_next['state_final']
-                        sards = (_s, _a, _r, _done, _s_next)
-                        rollout['sards'].append(sards)
+                        
+                        if 'state_final' in s_next:
+                            _s_next['state_final'] = s_next['state_final']
+                            
+                        sards = (_s, _a, _r, _done, _s_next, score)
+                        rollout['sards_s'].append([sards, score])
                         num_data += 1
                     
                     # for _ in range(10):
@@ -136,12 +141,13 @@ def get_data(idx, config, q_data, q_data_argmax, q_count, q_eps, q_flag_models, 
 
                 if done:
                     s = env.reset()
+                    score = 0
                 else:
                     s = s_next
 
             for _ in range(_num_collection):
-                sards = rollout['sards'].pop(0)
-                q_data.put(sards)
+                sards_s = rollout['sards_s'].pop(0)
+                q_data.put(sards_s)
         
         elif q_data_argmax.qsize() > 0:
             idx_data, data_argmax =  q_data_argmax.get()
@@ -262,8 +268,8 @@ class Simulator:
                     print(f"collecting data.. {num_data} are left")
                     num_data_prev = num_data
             if self.q_data.qsize() > 0 :
-                sards = self.q_data.get()
-                self.model.add_to_replay_buffer(sards)
+                sards, score = self.q_data.get()
+                self.model.replay_buffer.append(sards, score, 0)
                 num_data = num_data - 1
             else:
                 time.sleep(1e-3)
