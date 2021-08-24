@@ -64,22 +64,31 @@ def test(config, model, step_train=0, path_log=None):
     return sum(costs), max(costs), amplitude, score, Q_pred, reward_avg
 
 def train(args, config, model, agent):
-    now = datetime.now()
-    path_log = f"logs/[{now.strftime('%y%m%d')}][{now.strftime('%H-%M-%S')}]"
-    os.makedirs(path_log, exist_ok=True)
-    os.system(f"rsync -av --progress . {path_log}/ --exclude logs")
-
     path_prev = args.path_prev
     if path_prev:
         state_dict = torch.load(path_prev)
         state_dict = {key: state_dict[key].to(device) for key in state_dict}
         model.load_state_dict(state_dict)
-        f = open(f"{path_log}/comment.txt", 'w')
-        f.write(path_prev)
+        # f = open(f"{path_log}/comment.txt", 'w')
+        # f.write(path_prev)
+        # f.close()
+        name_model = path_prev.split('/')[-1]
+        path_log = path_prev.rstrip(name_model)
+    else:
+        now = datetime.now()
+        path_log = f"logs/[{str(args.conf)}][{now.strftime('%y%m%d')}][{now.strftime('%H-%M-%S')}]"
+        os.makedirs(path_log, exist_ok=True)
+
+        f = open(f"{path_log}/conf.txt", 'w')
+        f.write(str(args))
         f.close()
+    
+    os.system(f"rsync -av --progress . {path_log}/ --exclude=logs --exclude=logs_backup")
 
     step_prev = args.step_prev
     model.step_train = step_prev
+    step_min = 0
+    cost_min = None
     
     optimizer = Adam(model.parameters(), lr=config['learning']['lr_start'], betas=(0.95, 0.999))
     logger_tool = LoggerTool(path_log)
@@ -113,7 +122,7 @@ def train(args, config, model, agent):
             # showing and writing loss
             time_10_step = time.time() - _time_10_step
             print(
-                f"[{step_train}] lr: {optimizer.param_groups[0]['lr']:.5f} "
+                f"[{str(args.conf)}][{step_train}] lr: {optimizer.param_groups[0]['lr']:.5f} "
                 + f"sqrt_loss_bellman: {info['loss_bellman'] ** 0.5:.3f}, "
                 + f"loss_pred: {info['loss_cross_entropy']:.3f}, "
                 + f"time_10_step: {time_10_step:.2f} "
@@ -127,29 +136,42 @@ def train(args, config, model, agent):
             
         if step_train % 100 == 0:
             # Test the performance of the training agent
-            total_cost, max_cost, amplitude, score, Q_pred, reward_avg = test(config, model, step_train=step_train, path_log=path_log)
-            print(
-                f"toptal_cost: {total_cost} "
-                + f"max_cost: {max_cost} "
-                + f"amplitude: {amplitude} "
-                + f"score: {score} "
-                + f"Q_pred: {Q_pred} "
-                + f"r_avg: {reward_avg} "
-                )
-            logger_tool.write(
-                step_train, 
-                {
-                    'sqrt_loss_bellman': info['loss_bellman'] ** 0.5,
-                    'loss_pred': info['loss_cross_entropy'],
-                    'training_time': time_train,
-                    'total_cost': total_cost,
-                    'max_cost': max_cost,
-                    'amplitude': amplitude,
-                    'score': score,
-                    'reward_avg': reward_avg,
-                    'Q_pred': Q_pred,
-                    }
-                )
+            try:
+                total_cost, max_cost, amplitude, score, Q_pred, reward_avg = test(config, model, step_train=step_train, path_log=path_log)
+                if cost_min is None:
+                    cost_min = max_cost
+
+                if max_cost < cost_min:
+                    step_min = step_train
+                    cost_min = max_cost
+
+                print(
+                    f"toptal_cost: {total_cost:.3f} "
+                    + f"max_cost: {max_cost:.3f} "
+                    + f"amplitude: {amplitude:.3f} "
+                    + f"score: {score:.3f} "
+                    + f"Q_pred: {Q_pred:.3f} "
+                    + f"r_avg: {reward_avg:.3f} "
+                    + f"step_min: {step_min} "
+                    )
+                logger_tool.write(
+                    step_train, 
+                    {
+                        'sqrt_loss_bellman': info['loss_bellman'] ** 0.5,
+                        'loss_pred': info['loss_cross_entropy'],
+                        'training_time': time_train,
+                        'total_cost': total_cost,
+                        'max_cost': max_cost,
+                        'amplitude': amplitude,
+                        'score': score,
+                        'reward_avg': reward_avg,
+                        'Q_pred': Q_pred,
+                        'step_min': step_min,
+                        }
+                    )
+
+            except Exception as e:
+                print(f"erorr happened in test train.test() as below: \n {e}")
 
         # saving model
         if step_train > 1 and step_train % 1000 == 0:
