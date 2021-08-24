@@ -2,5 +2,6 @@ test
 test1
 test2
 logs
+logs_backup
 __pycache__
 *.pyc
