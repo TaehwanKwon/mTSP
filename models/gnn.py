@@ -115,8 +115,8 @@ class Model(nn.Module):
         self.sigma = 0e-3
         self.dim_edge = 5
 
-        self.T1 = 4
-        self.T2 = 4
+        self.T1 = 5
+        self.T2 = 5
 
         # Used for estimating presence probabilities
         self.fc1_presence = nn.Linear(
@@ -203,7 +203,7 @@ class Model(nn.Module):
         x_b = state['x_b'] # (n_batch, n_nodes, 1)
         coord = state['coord'] # (n_batch, n_nodes, 2)
         edge = state['edge'] # (n_batch, n_cities, n_nodes, 3)
-        presence_prev = state['presence_prev']
+        #presence_prev = state['presence_prev']
 
         avail_node_presence = state['avail_node_presence'] # (n_batch, 1, n_nodes)
         #avail_node_action = state['avail_node_action'] # (n_batch, 1, n_nodes)
@@ -489,11 +489,11 @@ class Model(nn.Module):
                     self.config['env']['num_robots'],
                     self.config['env']['num_cities'] + 1
                     ),
-                'presence_prev': (
-                    self.config['learning']['size_batch'], 
-                    self.config['env']['num_cities'], # no '+1' since there is no edge going out from the base
-                    self.config['env']['num_cities'] + 1
-                    ),
+                # 'presence_prev': (
+                #     self.config['learning']['size_batch'], 
+                #     self.config['env']['num_cities'], # no '+1' since there is no edge going out from the base
+                #     self.config['env']['num_cities'] + 1
+                #     ),
                 'x_a': (
                     self.config['learning']['size_batch'], 
                     self.config['env']['num_robots'],
