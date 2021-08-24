@@ -44,7 +44,7 @@ class Robot:
         self.remaining_distance = self.remaining_distance - dt * self.speed
         dy = self.assigned_city.y - self.y  
         dx = self.assigned_city.x - self.x
-        dist = (dy ** 2 + dx ** 2) ** 0.5
+        dist = (dy ** 2 + dx ** 2) ** 0.5 + 1e-10
         self.x = self.x + (dx / dist) * dt * self.speed
         self.y = self.y + (dy / dist) * dt * self.speed
         logger.debug(f"self.x: {self.x}, self.y: {self.y}")
@@ -72,6 +72,9 @@ class Robot:
         self.is_assigned = False
         self.assigned_city = None
         self.remaining_distance = -1
+
+        self.x = self.location_history[-1].x
+        self.y = self.location_history[-1].y
 
         return is_at_base
 
@@ -242,7 +245,7 @@ class MTSP(Env):
 
         plt.legend(bbox_to_anchor=(0.5, 0.025, 0.5, 0.5), loc=1, borderaxespad=0., fontsize=10, framealpha=0.4)
         if not path is None:
-            plt.savefig(path)
+            plt.savefig(path, transparent=True)
             plt.close()
 
     def render(self):
@@ -453,7 +456,10 @@ class MTSP(Env):
 
         state_final = np.zeros([1, len(self.cities) + 1, len(self.robots)])
         for idx_city, city in enumerate(self.cities):
-            assert not city.visited_robot is None, f"done: {done} if game is done, every city should be visited by some robot"
+            assert not city.visited_robot is None, (
+                f"done: {done} if game is done, every city should be visited by some robot \n"
+                + f"is_returned_to_base: {[ robot.is_returned_to_base for robot in self.robots ]}"
+                )
             idx_robot = self.robots.index(city.visited_robot)
             state_final[:, idx_city, idx_robot] = 1.0
         state_final[:, -1, :] = 1.0 / len(self.robots)
@@ -501,7 +507,7 @@ class MTSP(Env):
         time_spent, done = self.update_robots()
         state_next = self.get_numpy_state()
         state_final = self.get_state_final(done)        
-        state_next['state_final'] = state_final
+        #state_next['state_final'] = state_final
         
         reward = - self.config['scale_reward'] * time_spent / self.std_dist
 
