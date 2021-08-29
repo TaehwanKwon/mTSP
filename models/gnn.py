@@ -561,7 +561,7 @@ class Model(nn.Module):
 
         chosen_nodes = []
         n_for_auction = len(idx_avail_robots)
-        for _ in range(n_for_auction):
+        for i_auc in range(n_for_auction):
 
             idx_optimal_avail_nodes = []
             optimal_Qs = []
@@ -599,6 +599,11 @@ class Model(nn.Module):
                 idx_optimal_avail_nodes.append(idx_avail_nodes[idx_optimal_avail_node])
                 optimal_Qs.append(optimal_Q)
 
+                # print(
+                #     f"idx_avail_nodes: {idx_avail_nodes} \n"
+                #     + f"idx_optimal_avail_nodes: {idx_optimal_avail_nodes} \n"
+                #     )
+
                 #logger.debug(f"Q_avail_nodes_of_a_robot {idx_avail_robots[count]}: {Q_avail_nodes_of_a_robot}")
                 count += 1
 
@@ -613,9 +618,11 @@ class Model(nn.Module):
             #logger.debug(f"idx_avail_nodes: {idx_avail_nodes}")
 
             final_auction_action[0, argmax_robot, argmax_node] = 1
-            updated_avail_node_action[0, 0, argmax_node] = 0
+            updated_avail_node_action[0, :, argmax_node] = 0
             
-            self._remove_node(idx_avail_nodes, argmax_node)
+            for idx_avail_nodes in idx_avail_nodes_list:
+                if argmax_node in idx_avail_nodes:
+                    self._remove_node(idx_avail_nodes, argmax_node)
             idx_avail_robots.remove(argmax_robot)
 
             auction_result[argmax_robot] = argmax_node
@@ -674,6 +681,10 @@ class Model(nn.Module):
 
     def _remove_node(self, idx_nodes, idx_node):
         if not idx_node == self.config['env']['num_cities']:
+            # print(
+            #     f"idx_nodes: {idx_nodes} \n"
+            #     + f"idx_node: {idx_node} \n"
+            #     )
             idx_nodes.remove(idx_node) # We do not exclude base for avail_node_action
 
     def _get_idx_avail_robots_from_state(self, state):
