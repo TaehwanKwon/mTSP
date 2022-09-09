@@ -23,7 +23,7 @@ from datetime import datetime
 
 import argparse
 
-def test(config, model, step_train=0, path_log=None):
+def test(config, model, step_train=0, path_log=None, prev_cost_min=None):
     config_env = config['env_test'] if 'env_test' in config else config['env']
     model.config['env'] = config_env # switch the configuration of environment
 
@@ -55,7 +55,10 @@ def test(config, model, step_train=0, path_log=None):
     costs = [ robot.cost for robot in env.robots ]
     amplitude = max(costs) - min(costs)
     
-    if not path_log is None:
+    if (
+        not path_log is None
+        and max(costs) < prev_cost_min
+    ):
         env.draw(path=path_log + f'/location_history_{step_train}.png', pred=pred)
 
     model.config['env'] = config['env'] # Rollback the configuration of environment
@@ -78,19 +81,20 @@ def train(args, config, model, agent):
         now = datetime.now()
         path_log = f"logs/[{str(args.conf)}][{now.strftime('%y%m%d')}][{now.strftime('%H-%M-%S')}]"
         os.makedirs(path_log, exist_ok=True)
+        os.makedirs(path_log + '/codes', exist_ok=True)
 
         f = open(f"{path_log}/conf.txt", 'w')
         f.write(str(args))
         f.close()
     
-    os.system(f"rsync -av --progress . {path_log}/ --exclude=logs --exclude=logs_backup")
+    os.system(f"rsync -av --progress . {path_log}/codes/ --exclude=logs --exclude=logs_backup")
 
     step_prev = args.step_prev
     model.step_train = step_prev
     step_min = 0
-    cost_min = None
+    cost_min = float("inf")
     
-    optimizer = Adam(model.parameters(), lr=config['learning']['lr_start'], betas=(0.95, 0.999))
+    optimizer = AdamW(model.parameters(), lr=config['learning']['lr_start'], weight_decay=1e-3)
     logger_tool = LoggerTool(path_log)
 
     _time_10_step = time.time()
@@ -133,13 +137,15 @@ def train(args, config, model, agent):
             # adding new data to replay buffer
             model.simulator.save_to_replay_buffer(config['learning']['size_batch'])
             model.reset_target()
-            
-        if step_train % 100 == 0:
+
+        if step_train % 25 == 0:
             # Test the performance of the training agent
             try:
-                total_cost, max_cost, amplitude, score, Q_pred, reward_avg = test(config, model, step_train=step_train, path_log=path_log)
-                if cost_min is None:
-                    cost_min = max_cost
+                total_cost, max_cost, amplitude, score, Q_pred, reward_avg = test(config,
+                                                                                  model,
+                                                                                  step_train=step_train,
+                                                                                  path_log=path_log,
+                                                                                  prev_cost_min=cost_min)
 
                 if max_cost < cost_min:
                     step_min = step_train
@@ -184,7 +190,7 @@ def train(args, config, model, agent):
 
 if __name__=='__main__':
     mp.set_start_method('spawn')
-    device = 'cuda:0'
+
 
     parser = argparse.ArgumentParser(description='train_mtsp')
     parser.add_argument('--path_prev', type=str, 
@@ -193,9 +199,11 @@ if __name__=='__main__':
                         help='previous train step')
     parser.add_argument('--conf', type=str, 
                         help='conf to be used for training')
+    parser.add_argument('--gpu', type=int, default=0, help='gpu idx')
     args = parser.parse_args()
     print(args)
-    
+
+    device = f'cuda:{args.gpu}'
 
     config = __import__(f'conf.{args.conf}', fromlist=[None]).config
     model = __import__(f"models.{config['learning']['model']}", fromlist=[None]).Model(config, device).to(device)

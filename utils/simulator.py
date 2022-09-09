@@ -218,6 +218,7 @@ class Simulator:
         self.q_eps = mp.Queue()
         self.q_model = mp.Queue()
         self.q_flag_models = mp.Queue()
+        self.q_stat = mp.Queue()
 
         self.procs = list()
         for idx in range(self.config['learning']['num_processes']):
@@ -231,8 +232,10 @@ class Simulator:
             assert not target_func is None, f"Invalid algorithm is set for learning: {learning_algorithm}"
 
             proc = mp.Process(
-                target = target_func, 
-                args = (idx, self.config, self.q_data, self.q_data_argmax, self.q_count, self.q_eps, self.q_flag_models, self.q_model)
+                target=target_func,
+                args=(idx, self.config, self.q_data, self.q_data_argmax,
+                      self.q_count, self.q_eps, self.q_flag_models,
+                      self.q_model)
                 )
             proc.start()
             self.procs.append(proc)

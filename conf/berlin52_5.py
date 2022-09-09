@@ -26,6 +26,9 @@ config = {
         'sampling_method': 'prioritized',
         'algorithm': 'optimal_q_learning',
         #'algorithm': 'sarsa',
+
+        'base_hidden_size': 128,
+
         'lr_start': 1e-5,
         'lr_end': 1e-5,
         'lr_step': 500,

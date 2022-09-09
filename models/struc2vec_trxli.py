@@ -1,7 +1,7 @@
-''' 
+'''
 -----------------------------------------------
 Explanation:
-GNN model to be used for embedding a random graph 
+GNN model to be used for embedding a random graph
 -----------------------------------------------
 '''
 import os
@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 from threading import Thread
 from utils.simulator import Simulator
+from models.utils.trxli import TrXLI
+from models.utils.rational_activation import RationalActivation
 
 class ReplayBuffer:
     def __init__(self, config):
@@ -44,17 +46,10 @@ class ReplayBuffer:
     def append(self, sards, score, td):
         # ('state, action, reward, state_next, done')
         if len(self.buffer) == self.size:
-            p = self._get_elimination_prob()
-            idx_elimination = np.random.choice(
-                np.arange(len(self.buffer), dtype=np.int32),
-                size=1,
-                replace=False
-            ).tolist()[0]
+            self.buffer.pop(0)
+            self.score_list.pop(0)
+            self.td_list.pop(0)
 
-            self.buffer.pop(idx_elimination)
-            self.score_list.pop(idx_elimination)
-            self.td_list.pop(idx_elimination)
-        
         self.buffer.append(sards)
         self.score_list.append(score)
         self.td_list.append(td)
@@ -63,7 +58,7 @@ class ReplayBuffer:
         score_array = np.array(self.score_list)
         score_min, score_max = score_array.min(), score_array.max()
         normalized_score_array = (score_array - score_min) / (score_max - score_min + 1e-3)
-        
+
         td_array = np.abs(np.array(self.td_list))
         td_array[td_array==0] = td_array.max()
         td_min, td_max = td_array.min(), td_array.max()
@@ -74,25 +69,10 @@ class ReplayBuffer:
 
         return p
 
-    def _get_elimination_prob(self):
-        score_array = np.array(self.score_list)
-        score_min, score_max = score_array.min(), score_array.max()
-        normalized_score_array = (score_array - score_min) / (score_max - score_min + 1e-3)
-
-        td_array = np.abs(np.array(self.td_list))
-        td_array[td_array == 0] = td_array.max()
-        td_min, td_max = td_array.min(), td_array.max()
-        normalized_td_array = (td_array - td_min) / (td_max - td_min + 1e-3)
-
-        exponent = np.exp(-(self.alpha_score * normalized_score_array + self.alpha_td * normalized_td_array))
-        p = exponent / np.sum(exponent)
-
-        return p
-
     def _sample_uniform(self):
         idx_sample_list = np.random.choice(
-            np.arange(len(self.buffer), dtype=np.int32), 
-            size=self.config['learning']['size_batch'], 
+            np.arange(len(self.buffer), dtype=np.int32),
+            size=self.config['learning']['size_batch'],
             replace=False
             ).tolist()
         samples = operator.itemgetter(*idx_sample_list)(self.buffer)
@@ -101,8 +81,8 @@ class ReplayBuffer:
     def _sample_prioritized(self):
         p = self._get_replay_prob()
         idx_sample_list = np.random.choice(
-            np.arange(len(self.buffer), dtype=np.int32), 
-            size=self.config['learning']['size_batch'], 
+            np.arange(len(self.buffer), dtype=np.int32),
+            size=self.config['learning']['size_batch'],
             replace=False,
             p=p
             ).tolist()
@@ -110,9 +90,9 @@ class ReplayBuffer:
         return samples, idx_sample_list
 
     def sample(self):
-        ''' 
+        '''
         ############ CAUTION ############
-        random.sample() does not copy data, it takes reference. 
+        random.sample() does not copy data, it takes reference.
         Do not change the data after sampling.
         '''
         assert len(self.buffer) >= self.config['learning']['size_batch'], (
@@ -134,22 +114,29 @@ class Model(nn.Module):
         self.tau = 1.
         self.base_hidden_size = self.config['learning']['base_hidden_size']
         self.bias = True
+        self.normalize = True
         self.sigma = 0e-3
         self.dim_edge = 5
-        self.activation = torch.relu
+        self.activation = RationalActivation() if self.config['learning']['activation'] == 'rational' else nn.ReLU()
 
-        self.T1 = 5
-        self.T2 = 5
+        self.fc_x_trxli = nn.Linear(8 + self.config['env']['num_robots'], self.base_hidden_size, bias=self.bias)
+        self.trxlis = nn.ModuleList(
+            [TrXLI(self.config, self.activation) for _ in range(self.config['learning']['n_layer'])]
+        )
+
+        self.T1 = 3
+        self.T2 = 3
 
         # Used for estimating presence probabilities
         self.fc1_presence = nn.Linear(
-            self.dim_edge + 2 * (3 + self.config['env']['num_robots']), 
-            self.base_hidden_size, 
+            #self.dim_edge + 2 * (3 + self.config['env']['num_robots']),
+            self.dim_edge + 2 * self.base_hidden_size,
+            self.base_hidden_size,
             bias=self.bias
-            )
+        )
         self.fc2_presence = nn.Linear(self.base_hidden_size, 1, bias=self.bias)
 
-        self.fc_x_1 = nn.Linear(8 + self.config['env']['num_robots'], self.base_hidden_size, bias=self.bias)
+        self.fc_x_1 = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
         self.fc_embedding_1 = nn.Linear(self.dim_edge, self.base_hidden_size, bias=self.bias)
         self.fc_l_1 = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
 
@@ -157,7 +144,8 @@ class Model(nn.Module):
         self.fc_embedding_2 = nn.Linear(self.dim_edge, self.base_hidden_size, bias=self.bias)
         self.fc_l_2 = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
 
-        self.fc_Q = nn.Linear(self.base_hidden_size, 1, bias=False)
+        self.fc_Q_1 = nn.Linear(self.base_hidden_size, self.base_hidden_size)
+        self.fc_Q = nn.Linear(self.base_hidden_size, 1)
 
         self.replay_buffer = ReplayBuffer(config)
         self.device = device
@@ -169,16 +157,16 @@ class Model(nn.Module):
 
         self.keys = {
             'state': [
-                'assignment_prev', 
-                #'presence_prev', 
-                'x_a', 
-                'x_b', 
-                'coord', 
-                'edge', 
+                'assignment_prev',
+                #'presence_prev',
+                'x_a',
+                'x_b',
+                'coord',
+                'edge',
                 'avail_node_presence'
                 ],
-            'action': list(), 
-            'reward': list(), 
+            'action': list(),
+            'reward': list(),
             'done': list(),
         }
         self.show_presence = False
@@ -214,7 +202,7 @@ class Model(nn.Module):
             thread.join()
 
     def forward(self, state, action):
-        ''' 
+        '''
         -----------------------------------------------
         Explanation:
         This function returns Q from state
@@ -229,7 +217,7 @@ class Model(nn.Module):
 
         avail_node_presence = state['avail_node_presence'] # (n_batch, 1, n_nodes)
         #avail_node_action = state['avail_node_action'] # (n_batch, 1, n_nodes)
-        
+
         #avail_robot = state['avail_robot'] # (n_batch, 1, n_robots)
         #no_robot = torch.sum(avail_robot, dim=-1).squeeze(-1)==0
         #if no_robot.any(): logger.debug(f"There is no available robot in some batch, {no_robot}, may be the game is done")
@@ -241,40 +229,35 @@ class Model(nn.Module):
         n_cities = edge.shape[1]
         n_nodes = edge.shape[2]
 
+        u = self.sigma * torch.randn(n_batch, n_nodes, self.base_hidden_size).to(self.device)
+        gamma = self.sigma * torch.randn(n_batch, n_nodes, self.base_hidden_size).to(self.device)
+
         x = torch.cat(
             [
-                #x_a[:, :, self.config['env']['num_robots']:self.config['env']['num_robots'] + 1], 
-                x_a, 
-                x_b, 
-                coord, 
+                #x_a[:, :, self.config['env']['num_robots']:self.config['env']['num_robots'] + 1],
+                x_a,
+                x_b,
+                coord,
                 avail_node_presence.transpose(-2,-1)
                 ],
              dim=-1
              ) # (n_batch, n_nodes, 3)
-        
-        u = self.sigma * torch.randn(n_batch, n_nodes, self.base_hidden_size).to(self.device)
-        gamma = self.sigma * torch.randn(n_batch, n_nodes, self.base_hidden_size).to(self.device)
 
-        h0_presence = torch.cat(
-            [
-            edge, 
-            x_a[:, :-1, :].unsqueeze(-2).repeat(1, 1, n_nodes, 1), 
-            x_a.unsqueeze(-3).repeat(1, n_cities, 1, 1)
-            ],
-            dim = -1
-            )
-        h1_presence = self.activation(self.fc1_presence(h0_presence))
-        h2_presence = self.fc2_presence(h1_presence).squeeze(-1) # (n_batch, n_cities, n_nodes)
-        h2_presence = h2_presence / self.tau
-        mask_presence = 1 - torch.eye(n_cities, n_nodes).unsqueeze(0).repeat(n_batch, 1, 1).to(self.device) # eleminate self-feeding presence
-        mask_presence = mask_presence * avail_node_presence 
-        mask_presence[:, :, -1] = 0.0 # mask out base node when calculating presence_out
-        logit_presence = h2_presence * mask_presence - (1 - mask_presence) * 1e10
-        presence_out = torch.softmax(logit_presence, dim = -1)  # (n_batch, n_cities, n_nodes)
-        
+        h_trxli = self.activation(self.fc_x_trxli(x))
+        for i in range(self.config['learning']['n_layer']):
+            h_trxli = self.trxlis[i](h_trxli) # (n_batch, n_nodes, d)
+
+        mask_presence = 1 - torch.eye(n_cities, n_nodes).unsqueeze(0).repeat(n_batch, 1, 1).to(
+            self.device)  # eleminate self-feeding presence
+        mask_presence = mask_presence * avail_node_presence
+        mask_presence[:, :, -1] = 0.0  # mask out base node when calculating presence_out
+        presence_out = mask_presence # (n_batch, n_cities, n_nodes)
+        if self.normalize:
+            presence_out = presence_out / (torch.sum(presence_out, dim=-1, keepdim=True) + 1e-10)
+
         # # handling visited nodes
         if not 'presence_prev' in self.config['learning'] or not self.config['learning']['presence_prev']:
-            presence_out = avail_node_presence[:, :, :-1].transpose(-2, -1) * presence_out # masking presence out from visited nodes
+            presence_out = avail_node_presence[:, :, :-1].transpose(-2, -1) * presence_out  # masking presence out from visited nodes
         else:
             mask_drawed_presence_out = torch.sum(presence_prev, dim=-1) > 0
             mask_drawed_presence_out = mask_drawed_presence_out.float().unsqueeze(-1)
@@ -282,42 +265,48 @@ class Model(nn.Module):
 
         if 'no_presence' in self.config['learning'] and self.config['learning']['no_presence']:
             presence_out = presence_out / (presence_out.sum(dim=-1, keepdim=True) + 1e-10)
-        
+
         if self.show_presence:
             print(f"presnce_out: {presence_out[0].max(dim=-1)}")
 
-        presence_in = presence_out.transpose(1, 2).unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
-        edge_dist = edge[:, :, :, 0:self.dim_edge].transpose(1, 2) # (n_batch, n_nodes, n_cities, 1)
-        #_presence_in = presence_in.unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
+        presence_in = presence_out.transpose(1, 2).unsqueeze(-2)  # (n_batch, n_nodes, 1, n_cities)
+        edge_dist = edge[:, :, :, 0:self.dim_edge].transpose(1, 2)  # (n_batch, n_nodes, n_cities, 1)
+        # _presence_in = presence_in.unsqueeze(-2) # (n_batch, n_nodes, 1, n_cities)
 
         # First convolution of graphs
         for t in range(self.T1):
-            ## Original concating method            
-            embedding_dist_1 = torch.tanh(self.fc_embedding_1(edge_dist)) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
-            embedding_dist_1 = u[:, :-1, :].unsqueeze(1) * embedding_dist_1 # (n_batch, 1 -> n_nodes, n_cities, self.base_hidden_size)
+            ## Original concating method
+            embedding_dist_1 = torch.tanh(
+                self.fc_embedding_1(edge_dist))  # (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_1 = u[:, :-1, :].unsqueeze(
+                1) * embedding_dist_1  # (n_batch, 1 -> n_nodes, n_cities, self.base_hidden_size)
 
-            l_1 = torch.matmul(presence_in, embedding_dist_1) # (n_batch, n_nodes, 1, self.base_hidden_size)
-            l_1 = l_1.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size)
-            #l_a = torch.matmul(presence_in, u_a[:, :-1, :])
-            u = self.activation(self.fc_l_1(l_1) + self.fc_x_1(x) )
+            l_1 = torch.matmul(presence_in, embedding_dist_1)  # (n_batch, n_nodes, 1, self.base_hidden_size)
+            l_1 = l_1.squeeze(-2)  # (n_batch, n_nodes, self.base_hidden_size)
+            # l_a = torch.matmul(presence_in, u_a[:, :-1, :])
+            u = self.activation(self.fc_l_1(l_1) + self.fc_x_1(h_trxli))
 
         del l_1, x, x_a, x_b
         # Second convolution of graphs
         for t in range(self.T2):
-            embedding_dist_2 = torch.tanh(self.fc_embedding_2(edge_dist)) # (n_batch, n_nodes, n_cities, self.base_hidden_size)
-            embedding_dist_2 = gamma[:, :-1, :].unsqueeze(1) * embedding_dist_2 # (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_2 = torch.tanh(
+                self.fc_embedding_2(edge_dist))  # (n_batch, n_nodes, n_cities, self.base_hidden_size)
+            embedding_dist_2 = gamma[:, :-1, :].unsqueeze(
+                1) * embedding_dist_2  # (n_batch, n_nodes, n_cities, self.base_hidden_size)
 
-            l_2 = torch.matmul(presence_in, embedding_dist_2) # (n_batch, n_nodes, 1, self.base_hidden_size)
-            l_2 = l_2.squeeze(-2) # (n_batch, n_nodes, self.base_hidden_size)
-            #l_2 = torch.matmul(presence_in, gamma[:, :-1, :])
-            gamma = self.activation(self.fc_l_2(l_2) + self.fc_x_2(u)) # (n_batch, n_nodes, self.base_hidden_size)
+            l_2 = torch.matmul(presence_in, embedding_dist_2)  # (n_batch, n_nodes, 1, self.base_hidden_size)
+            l_2 = l_2.squeeze(-2)  # (n_batch, n_nodes, self.base_hidden_size)
+            # l_2 = torch.matmul(presence_in, gamma[:, :-1, :])
+            gamma = self.activation(self.fc_l_2(l_2) + self.fc_x_2(u))  # (n_batch, n_nodes, self.base_hidden_size)
         del u, l_2
 
-        sum_gamma_remained = torch.sum(gamma * avail_node_presence.transpose(-2, -1), dim=-2) # (n_batch, self.base_hidden_size)
-        sum_gamma_done = torch.sum(gamma * (1 - avail_node_presence.transpose(-2, -1)), dim=-2) # (n_batch, self.base_hidden_size)
-        cat_gamma = torch.cat([sum_gamma_remained, sum_gamma_done], dim=-1) # (n_batch, 2 * self.base_hidden_size)
-        #Q = self.fc_Q(cat_gamma) # (n_batch, 1)
-        Q = self.fc_Q(sum_gamma_remained) # (n_batch, 1)
+        sum_gamma_remained = torch.sum(gamma * avail_node_presence.transpose(-2, -1),
+                                       dim=-2)  # (n_batch, self.base_hidden_size)
+        sum_gamma_done = torch.sum(gamma * (1 - avail_node_presence.transpose(-2, -1)),
+                                   dim=-2)  # (n_batch, self.base_hidden_size)
+        cat_gamma = torch.cat([sum_gamma_remained, sum_gamma_done], dim=-1)  # (n_batch, 2 * self.base_hidden_size)
+        # Q = self.fc_Q(cat_gamma) # (n_batch, 1)
+        Q = self.fc_Q(sum_gamma_remained)  # (n_batch, 1)
 
         return Q
 
@@ -325,7 +314,7 @@ class Model(nn.Module):
         state_tensor = {
             key: torch.from_numpy(state[key]).float().to(self.device) for key in state if not (key=='avail_node_action' and key=='avail_robot')
         }
-        
+
         action_numpy = self._convert_list_action_to_numpy(action)
         action_tensor = torch.from_numpy(action_numpy).float().to(self.device)
         with torch.no_grad():
@@ -435,7 +424,7 @@ class Model(nn.Module):
             state_tuple, action_tuple, reward_tuple, done_tuple, state_next_tuple = zip(*batch)
         elif is_sarsa:
             state_tuple, action_tuple, reward_tuple, done_tuple, state_next_tuple, action_next_tuple = zip(*batch)
-        
+
         #self.sync_models()
         self.load_target()
 
@@ -446,12 +435,12 @@ class Model(nn.Module):
             _state_next_tuple = state_next_tuple[m * idx_data: m * (idx_data + 1)]
             q_data_argmax = (_done_tuple, _state_next_tuple, action_tuple[0])
             self.simulator.q_data_argmax.put( (idx_data, q_data_argmax) )
-        
+
         argmax_action_numpy_list = [None for _ in range(self.config['learning']['num_processes'])]
         for _ in range(self.config['learning']['num_processes']):
             idx_data, argmax_action_numpy = self.simulator.q_data.get()
             argmax_action_numpy_list[idx_data] = argmax_action_numpy
-            
+
         _argmax_action_numpy_list = list()
         for argmax_action_numpy in argmax_action_numpy_list:
             _argmax_action_numpy_list += argmax_action_numpy
@@ -510,54 +499,54 @@ class Model(nn.Module):
         self.shapes = {
             'state':{
                 'assignment_prev': (
-                    self.config['learning']['size_batch'], 
+                    self.config['learning']['size_batch'],
                     self.config['env']['num_robots'],
                     self.config['env']['num_cities'] + 1
                     ),
                 # 'presence_prev': (
-                #     self.config['learning']['size_batch'], 
+                #     self.config['learning']['size_batch'],
                 #     self.config['env']['num_cities'], # no '+1' since there is no edge going out from the base
                 #     self.config['env']['num_cities'] + 1
                 #     ),
                 'x_a': (
-                    self.config['learning']['size_batch'], 
+                    self.config['learning']['size_batch'],
                     self.config['env']['num_robots'],
                     self.config['env']['num_cities'] + 1,
                     3 + self.config['env']['num_robots']
                     ),
                 'x_b': (
-                    self.config['learning']['size_batch'], 
+                    self.config['learning']['size_batch'],
                     self.config['env']['num_cities'] + 1,
                     2
                     ),
                 'coord': (
-                    self.config['learning']['size_batch'], 
+                    self.config['learning']['size_batch'],
                     self.config['env']['num_cities'] + 1,
                     2
                     ),
                 'edge': (
-                    self.config['learning']['size_batch'], 
+                    self.config['learning']['size_batch'],
                     self.config['env']['num_cities'], # no '+1' since there is no edge going out from the base
-                    self.config['env']['num_cities'] + 1, 
+                    self.config['env']['num_cities'] + 1,
                     5
                     ),
                 'avail_node_presence': (
-                    self.config['learning']['size_batch'], 
+                    self.config['learning']['size_batch'],
                     1,
                     self.config['env']['num_cities'] + 1
                     ),
                 },
             'action': (
-                self.config['learning']['size_batch'], 
+                self.config['learning']['size_batch'],
                 self.config['env']['num_robots'],
                 self.config['env']['num_cities'] + 1
                 ),
             'reward': (
-                self.config['learning']['size_batch'], 
+                self.config['learning']['size_batch'],
                 1
                 ),
             'done': (
-                self.config['learning']['size_batch'], 
+                self.config['learning']['size_batch'],
                 1
                 ),
         }
@@ -605,11 +594,11 @@ class Model(nn.Module):
                         else np.tile(state[key], [len(idx_avail_nodes), 1, 1, 1])
                         for key in state
                         }
-                
+
                 # Make actions for computing Qs for every possible nodes for a robot
                 action_numpy = np.zeros([
-                                    len(idx_avail_nodes), 
-                                    self.config['env']['num_robots'], 
+                                    len(idx_avail_nodes),
+                                    self.config['env']['num_robots'],
                                     self.config['env']['num_cities'] + 1
                                     ]) + final_auction_action
 
@@ -644,7 +633,7 @@ class Model(nn.Module):
 
             final_auction_action[0, argmax_robot, argmax_node] = 1
             updated_avail_node_action[0, :, argmax_node] = 0
-            
+
             for idx_avail_nodes in idx_avail_nodes_list:
                 if argmax_node in idx_avail_nodes:
                     self._remove_node(idx_avail_nodes, argmax_node)
@@ -674,8 +663,8 @@ class Model(nn.Module):
             }
 
         action_numpy = np.zeros([
-            len(idx_avail_nodes), 
-            self.config['env']['num_robots'], 
+            len(idx_avail_nodes),
+            self.config['env']['num_robots'],
             self.config['env']['num_cities'] + 1
             ])
 
@@ -731,7 +720,7 @@ class Model(nn.Module):
         for i in range(self.config['env']['num_robots']):
             idx_avail_nodes_list.append(
                 np.int32(masked_idx_nodes[i][mask_avail_nodes[i]]).tolist()
-                )        
+                )
 
         return idx_avail_nodes_list
 

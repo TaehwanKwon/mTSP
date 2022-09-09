@@ -24,7 +24,11 @@ config = {
         'model': 'gnn',
         'presence_prev':False,
         'algorithm': 'optimal_q_learning',
+        'sampling_method': 'prioritized',  # uniform / prioritized
         #'algorithm': 'sarsa',
+
+        'base_hidden_size': 128,
+
         'lr_start': 1e-5,
         'lr_end': 1e-5,
         'lr_step': 500,
@@ -38,6 +42,6 @@ config = {
         'size_batch': 64,
         'size_replay_buffer': 40000,
         'num_rollout':1,
-        'num_processes': 2,
+        'num_processes': 4,
     }
 }
