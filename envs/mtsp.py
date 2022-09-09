@@ -7,6 +7,7 @@ Enviornment for Multiple Traveling Salesman Problem
 
 import os
 import sys
+import random
 sys.path.append(os.path.abspath( os.path.join(os.path.dirname(__file__), "..")))
 
 from envs import Env
@@ -79,11 +80,13 @@ class Robot:
 
         return is_at_base
 
+
 class Base:
     def __init__(self, x, y):
         self.x = x
         self.y = y
         self.assigned_robots = []
+
 
 class City:
     def __init__(self, city_id, x, y):
@@ -180,6 +183,17 @@ class MTSP(Env):
                     ) for idx in range(self.config['num_robots'])
                 ]
 
+    def _num_remaining_robots_at_base(self):
+        num_remaining_robots_at_base = 0
+        for robot in self.robots:
+            if (
+                robot.x == self.base.x
+                and robot.y == self.base.y
+                and not robot.is_returned_to_base
+            ):
+                num_remaining_robots_at_base += 1
+        return num_remaining_robots_at_base
+
     def reset(self):
         self._get_base()
         self._get_cities()
@@ -238,8 +252,8 @@ class MTSP(Env):
                 text = plt.text(
                     city.x, city.y,
                     text, 
-                    fontsize = 7.5,
-                    color = color
+                    fontsize=7.5,
+                    color=color
                     )
                 texts.append(text)
             adjust_text(texts, arrowprops=dict(arrowstyle="->", color='black', lw=1.5))
@@ -263,8 +277,7 @@ class MTSP(Env):
                 _distance = robot.remaining_distance
                 _dt = _distance / robot.speed
             else:
-                if not robot.is_returned_to_base:
-                    logger.error(f"Invaild situation, there is a robot not assigned to a city!!")
+                assert not robot.is_returned_to_base, f"Invaild situation, there is a robot not assigned to a city!!"
                 _dt = np.inf
             dts[idx] = _dt
 
@@ -306,13 +319,15 @@ class MTSP(Env):
 
         scale_dist = 0.25
         scale_coord = 0.5
-
-        state['x_a'] = np.zeros([1, len(self.robots), len(self.cities) + 1, len(self.robots) + 3])
+        state['x_robot_identity'] = np.zeros([1, len(self.robots), len(self.cities) + 1, len(self.robots)])
+        # (n_batch, n_robot, n_nodes, n_robots): containing information that which robot is assigned to a task (city)
+        # we are going to sum through dim=1 in network so robot identidy information is going to be removed if we don't use this information.
+        state['x_a'] = np.zeros([1, len(self.robots), len(self.cities) + 1, 3])
         # (n_batch, n_robot, n_nodes, d), assignments to nodes, for base node, only d_max is considered
         state['x_b'] = np.zeros([1, len(self.cities) + 1, 2])
         # (n_batch, 1, n_nodes), distance to base of each nodes, is_base for base node, 0 is constant input
         state['coord'] = np.zeros([1, len(self.cities) + 1, 2])
-        # (n_batch, 1, n_nodes), distance to base of each nodes, for base node, 0 is constant input
+        # (n_batch, 1, n_nodes), x, y coordinate of each nodes
         state['edge'] = np.zeros([1, len(self.cities), len(self.cities) + 1, 5]) 
         # (n_batch, n_cities, n_nodes, 3), distance to node, distance to base, is_targeting_base
         # -> relative pos from node, distance to node, is_targeting_base
@@ -331,8 +346,12 @@ class MTSP(Env):
         state['visitation'] = np.ones([1, len(self.cities) + 1, len(self.robots)]) / len(self.robots)
         # (n_batch, n_nodes, n_robots), previous visitation information
 
+        # Setup base node
         state['avail_node_presence'][0, 0, -1] = 1
         state['coord'][0, -1, :] = np.array([self.base.x, self.base.y])
+        state['x_b'][0, -1, 1] = 1.0  # is_base True for base
+
+        # Setup each node
         for idx_city, city in enumerate(self.cities):
             state['x_b'][0, idx_city, 0] = city.distance(self.base)
             state['x_b'][0, idx_city, 1] = 0. # is_base
@@ -372,7 +391,6 @@ class MTSP(Env):
                 0,
                 1
                 ])
-        state['x_b'][:, -1, 1] = 1.0 # is_base True
 
         # calculate avg, std for remaining nodes
         n_present = np.sum(state['avail_node_presence'])
@@ -411,13 +429,13 @@ class MTSP(Env):
                         state['presence_prev'][0, city1.id, -1] = 1
 
             for idx_city, city in enumerate(self.cities):
-                state['x_a'][0, idx_robot, idx_city, self.robots.index(robot)] = 1.0
-                state['x_a'][0, idx_robot, idx_city, len(self.robots)] = scale_dist * robot.distance(city) / std_dist
-                state['x_a'][0, idx_robot, idx_city, len(self.robots) + 1:] = scale_coord * np.array([robot.x - city.x, robot.y - city.y]) / std_coord
+                state['x_robot_identity'][0, idx_robot, idx_city, self.robots.index(robot)] = 1.0
+                state['x_a'][0, idx_robot, idx_city, 0] = scale_dist * robot.distance(city) / std_dist
+                state['x_a'][0, idx_robot, idx_city, 1:] = scale_coord * np.array([robot.x - city.x, robot.y - city.y]) / std_coord
                 state['avail_node_action'][0, idx_robot, idx_city] = float(city.is_available())
-            state['x_a'][0, idx_robot, -1, self.robots.index(robot)] = 1.0
-            state['x_a'][0, idx_robot, -1, len(self.robots)] = scale_dist * robot.distance(self.base) / std_dist
-            state['x_a'][0, idx_robot, -1, len(self.robots) + 1:] = scale_coord * np.array([robot.x - self.base.x, robot.y - self.base.y]) / std_coord
+            state['x_robot_identity'][0, idx_robot, -1, self.robots.index(robot)] = 1.0
+            state['x_a'][0, idx_robot, -1, 0] = scale_dist * robot.distance(self.base) / std_dist
+            state['x_a'][0, idx_robot, -1, 1:] = scale_coord * np.array([robot.x - self.base.x, robot.y - self.base.y]) / std_coord
             
             if not robot.assigned_city is None:
                 if type(robot.assigned_city) == Base:
@@ -473,7 +491,11 @@ class MTSP(Env):
         for idx, robot in enumerate(self.robots):
             _action = action[idx]
 
-            if robot.assigned_city is None and not robot.is_returned_to_base:
+            if (
+                robot.assigned_city is None
+                and not robot.is_returned_to_base
+                and _action is not None
+            ):
                 # Handle action 'go_base'
                 if _action == len(self.cities):
                     logger.debug(f"robot {robot.id} is going to base")
@@ -513,6 +535,18 @@ class MTSP(Env):
         reward = - self.config['scale_reward'] * time_spent / self.std_dist
 
         return state_next, reward, done
+
+    def sample_action(self):
+        available_robots = [i for i, robot in enumerate(self.robots) if not robot.is_assigned and not robot.is_returned_to_base]
+        available_nodes = [i for i, city in enumerate(self.cities) if not city.is_visited and city.assigned_robot is None]
+        if available_nodes == []:
+            available_nodes.append(len(self.cities))
+        action = [None for _ in range(len(self.robots))]
+        robot = random.sample(available_robots, 1)[0]
+        node = random.sample(available_nodes, 1)[0]
+        action[robot] = node
+        return action
+
 
 
 
