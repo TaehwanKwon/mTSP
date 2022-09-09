@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 from pprint import pprint
 from adjustText import adjust_text
 
+
 class Robot:
     def __init__(self, robot_id, x, y, speed):
         self.id = robot_id
