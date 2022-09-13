@@ -149,7 +149,7 @@ class Model(nn.Module):
             )
         self.fc2_presence = nn.Linear(self.base_hidden_size, 1, bias=self.bias)
 
-        self.fc_x_1 = nn.Linear(8 + self.config['env']['num_robots'], self.base_hidden_size, bias=self.bias)
+        self.fc_x_1 = nn.Linear(8, self.base_hidden_size, bias=self.bias)
         self.fc_embedding_1 = nn.Linear(self.dim_edge, self.base_hidden_size, bias=self.bias)
         self.fc_l_1 = nn.Linear(self.base_hidden_size, self.base_hidden_size, bias=self.bias)
 
@@ -250,7 +250,7 @@ class Model(nn.Module):
                 avail_node_presence.transpose(-2,-1)
                 ],
              dim=-1
-             ) # (n_batch, n_nodes, 3)
+             ) # (n_batch, n_nodes, 8)
         
         u = self.sigma * torch.randn(n_batch, n_nodes, self.base_hidden_size).to(self.device)
         gamma = self.sigma * torch.randn(n_batch, n_nodes, self.base_hidden_size).to(self.device)
@@ -519,11 +519,17 @@ class Model(nn.Module):
                 #     self.config['env']['num_cities'], # no '+1' since there is no edge going out from the base
                 #     self.config['env']['num_cities'] + 1
                 #     ),
+                'x_robot_identity': (
+                    self.config['learning']['size_batch'],
+                    self.config['env']['num_robots'],
+                    self.config['env']['num_cities'] + 1,
+                    self.config['env']['num_robots']
+                ),
                 'x_a': (
                     self.config['learning']['size_batch'], 
                     self.config['env']['num_robots'],
                     self.config['env']['num_cities'] + 1,
-                    3 + self.config['env']['num_robots']
+                    3
                     ),
                 'x_b': (
                     self.config['learning']['size_batch'], 
