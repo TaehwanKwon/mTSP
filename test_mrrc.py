@@ -43,7 +43,9 @@ if __name__ == '__main__':
         print(a)
         s_next, r, done = env.step(a)
         print(f'reward: {r}')
+        print(s_next['x_a'][:, :, :, 3])
         env.render()
+
 
     # Testing specific action
     # a = [0, None]
