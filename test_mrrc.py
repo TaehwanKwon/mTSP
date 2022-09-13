@@ -39,21 +39,21 @@ if __name__ == '__main__':
     s = env.reset()
     env.render()
 
+    # Testing specific action
+    # a = [0, None]
+    # s_next, r, done = env.step(a)
+    # print(f'reward: {r}')
+    # env.render()
+
     # Testing random action
     for _ in range(5):
         a = env.sample_action()
         print(a)
         s_next, r, done = env.step(a)
         print(f'reward: {r}')
-        print(s_next['x_a'][:, :, :, 3])
+        print(s_next['x_a'][:, 0, :, 3])
         env.render()
 
-
-    # Testing specific action
-    # a = [0, None]
-    # s_next, r, done = env.step(a)
-    # print(f'reward: {r}')
-    # env.render()
 
 
 
