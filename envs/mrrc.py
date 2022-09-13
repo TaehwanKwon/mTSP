@@ -429,12 +429,12 @@ class MRRC(Env):
 
             for idx_task, task in enumerate(self.tasks):
                 state['x_a'][0, idx_robot, idx_task, 0] = scale_dist * robot.distance(task)
-                state['x_a'][0, idx_robot, idx_task, 1:] = scale_coord * np.array(
+                state['x_a'][0, idx_robot, idx_task, 1:3] = scale_coord * np.array(
                     [robot.x - task.x, robot.y - task.y])
                 state['x_a'][0, idx_robot, idx_task, 3] = scale_age * task.age
                 state['avail_node_action'][0, idx_robot, idx_task] = float(task.is_available())
             state['x_a'][0, idx_robot, -1, 0] = scale_dist * robot.distance(self.base)
-            state['x_a'][0, idx_robot, -1, 1:] = scale_coord * np.array(
+            state['x_a'][0, idx_robot, -1, 1:3] = scale_coord * np.array(
                 [robot.x - self.base.x, robot.y - self.base.y])
 
             if not robot.assigned_task is None:
