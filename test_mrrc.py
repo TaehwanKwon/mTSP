@@ -24,6 +24,8 @@ from datetime import datetime
 
 import argparse
 
+## Command
+# python test_mrrc.py --conf=mrrc.mrrc_random_test
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='train_mtsp')
